@@ -1,0 +1,33 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m7",
+    "extra_flags": "-DSTM32H7xx -DSTM32H757xx -DCORE_CM7",
+    "f_cpu": "400000000L",
+    "mcu": "stm32h757iik6",
+    "product_line": "STM32H757xx",
+    "variant": "STM32H757"
+  },
+  "debug": {
+    "jlink_device": "STM32H757II",
+    "openocd_target": "stm32h7x_dual_bank",
+    "svd_path": "STM32H757_CM7.svd"
+  },
+  "frameworks": [
+    "arduino"
+  ],
+  "name": "CubeNode (STM32H757II)",
+  "upload": {
+    "maximum_ram_size": 524288,
+    "maximum_size": 2097152,
+    "protocol": "stlink",
+    "protocols": [
+      "stlink",
+      "jlink",
+      "cmsis-dap",
+      "serial"
+    ]
+  },
+  "url": "https://github.com/ExpressLRS",
+  "vendor": "CubePilot"
+}

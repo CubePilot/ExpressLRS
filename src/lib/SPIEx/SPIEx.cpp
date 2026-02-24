@@ -81,6 +81,10 @@ void ICACHE_RAM_ATTR SPIExClass::_transfer(uint8_t cs_mask, uint8_t *data, uint3
             dataPtr[i] = fifoPtr[i];
         }
     }
+#elif defined(PLATFORM_STM32)
+    digitalWrite(GPIO_PIN_NSS, LOW);
+    SPIEx.transfer(data, size);
+    digitalWrite(GPIO_PIN_NSS, HIGH);
 #endif
 }
 

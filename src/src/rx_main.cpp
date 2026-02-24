@@ -34,12 +34,16 @@
 #include "devLED.h"
 #include "devRXLUA.h"
 #include "devServoOutput.h"
+#if !defined(PLATFORM_STM32)
 #include "devWIFI.h"
+#endif
 #include "RXEndpoint.h"
 #include "RXOTAConnector.h"
 #include "rx-serial/devSerialIO.h"
 
+#if !defined(PLATFORM_STM32)
 #include <LittleFS.h>
+#endif
 #if defined(PLATFORM_ESP8266)
 #include <user_interface.h>
 #elif defined(PLATFORM_ESP32)
@@ -81,8 +85,10 @@ device_affinity_t ui_devices[] = {
 #endif
   {&LED_device, 0},
   {&RXLUA_device, 0},
+#if !defined(PLATFORM_STM32)
   {&RGB_device, 0},
   {&WIFI_device, 0},
+#endif
   {&Button_device, 0},
   {&AnalogVbat_device, 0},
   {&ServoOut_device, 1},
@@ -110,7 +116,9 @@ bool crsfBatterySensorDetected = false;
 bool crsfBaroSensorDetected = false;
 
 unsigned long rebootTime = 0;
+#if !defined(PLATFORM_STM32)
 extern bool webserverPreventAutoStart;
+#endif
 bool pwmSerialDefined = false;
 uint32_t serialBaud;
 
@@ -207,7 +215,9 @@ static uint8_t debugRcvrLinkstatsFhssIdx;
 
 bool BindingModeRequest = false;
 
+#if !defined(PLATFORM_STM32)
 extern void setWifiUpdateMode();
+#endif
 void reconfigureSerial();
 
 uint8_t getLq()
@@ -867,7 +877,9 @@ void GotConnection(unsigned long now)
     setConnectionState(connected); //we got a packet, therefore no lost connection
     RXtimerState = tim_tentative;
     GotConnectionMillis = now;
+#if !defined(PLATFORM_STM32)
     webserverPreventAutoStart = true;
+#endif
 
     if (firmwareOptions.is_airport)
     {
@@ -1223,10 +1235,12 @@ void DataUlReceiveComplete()
     {
     case MSP_ELRS_SET_RX_WIFI_MODE: //0x0E
         // The MSP packet needs to be ACKed so the TX doesn't
+#if !defined(PLATFORM_STM32)
         // keep sending it, so defer the switch to wifi
         deferExecutionMillis(500, []() {
             setWifiUpdateMode();
         });
+#endif
         break;
     case MSP_ELRS_MAVLINK_TLM: // 0xFD
         // raw mavlink data
@@ -1340,6 +1354,22 @@ static void setupSerial()
     // ARDUINO_CORE_INVERT_FIX PT2 end
 
     Serial.begin(serialBaud, serialConfig, GPIO_PIN_RCSIGNAL_RX, GPIO_PIN_RCSIGNAL_TX, invert);
+#elif defined(PLATFORM_STM32)
+    uint32_t serialConfig = SERIAL_8N1;
+
+    if(sbusSerialOutput)
+    {
+        serialConfig = SERIAL_8E2;
+    }
+    else if(hottTlmSerial)
+    {
+        serialConfig = SERIAL_8N2;
+    }
+
+    (void)invert; // TODO: implement serial inversion on STM32
+    Serial.setRx(GPIO_PIN_RCSIGNAL_RX);
+    Serial.setTx(GPIO_PIN_RCSIGNAL_TX);
+    Serial.begin(serialBaud, serialConfig);
 #endif
 
     if (firmwareOptions.is_airport)
@@ -1690,7 +1720,9 @@ static void ExitBindingMode()
     OtaUpdateCrcInitFromUid();
     FHSSrandomiseFHSSsequence(uidMacSeedGet());
 
+#if !defined(PLATFORM_STM32)
     webserverPreventAutoStart = true;
+#endif
 
     // Force RF cycling to start at the beginning immediately
     scanIndex = RATE_MAX;
@@ -1739,8 +1771,10 @@ static void updateBindingMode(unsigned long now)
     // If the power on counter is >=3, enter binding, the counter will be reset after 2s
     else if (!InBindingMode && config.GetPowerOnCounter() >= 3)
     {
+#if !defined(PLATFORM_STM32)
         // Never enter wifi if forced to binding mode
         webserverPreventAutoStart = true;
+#endif
         DBGLN("Power on counter >=3, enter binding mode");
         EnterBindingMode();
     }
@@ -1788,8 +1822,10 @@ void EnterBindingModeSafely()
     if (connectionState == serialUpdate || InBindingMode)
         return;
 
+#if !defined(PLATFORM_STM32)
     // Never enter wifi mode after requesting to enter binding mode
     webserverPreventAutoStart = true;
+#endif
 
     // If the radio and everything is shut down, better to reboot and boot to binding mode
     if (connectionState == wifiUpdate || connectionState == bleJoystick)
@@ -1797,7 +1833,11 @@ void EnterBindingModeSafely()
         // Force 3-plug binding mode
         config.SetPowerOnCounter(3);
         config.Commit();
+#if defined(PLATFORM_STM32)
+        NVIC_SystemReset();
+#else
         ESP.restart();
+#endif
         // Unreachable
     }
 
@@ -1950,12 +1990,18 @@ void resetConfigAndReboot()
     // all this flash write is taking too long
     yield();
     // Remove options.json and hardware.json
+#if !defined(PLATFORM_STM32)
     LittleFS.format();
     yield();
     LittleFS.begin();
+#endif
     options_SetTrueDefaults();
 
+#if defined(PLATFORM_STM32)
+    NVIC_SystemReset();
+#else
     ESP.restart();
+#endif
 }
 
 void setup()
@@ -1966,13 +2012,14 @@ void setup()
         // if it decides to log something
         BackpackOrLogStrm = new NullStream();
 
+#if !defined(PLATFORM_STM32)
         // Register the WiFi with the framework
         static device_affinity_t wifi_device[] = {
             {&WIFI_device, 1}
         };
         devicesRegister(wifi_device, ARRAY_SIZE(wifi_device));
         devicesInit();
-
+#endif
         setConnectionState(hardwareUndefined);
     }
     else
@@ -2068,7 +2115,11 @@ void loop()
 
     // If the reboot time is set and the current time is past the reboot time then reboot.
     if (rebootTime != 0 && now > rebootTime) {
+#if defined(PLATFORM_STM32)
+        NVIC_SystemReset();
+#else
         ESP.restart();
+#endif
     }
 
     CheckConfigChangePending();
@@ -2173,5 +2224,8 @@ void reset_into_bootloader(void)
 #elif defined(PLATFORM_ESP32)
     delay(100);
     setConnectionState(serialUpdate);
+#elif defined(PLATFORM_STM32)
+    delay(100);
+    NVIC_SystemReset();
 #endif
 }

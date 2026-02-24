@@ -20,7 +20,7 @@ static deferred_t deferred[maxDeferredFunctions] = {
     {0, 0, nullptr},
 };
 
-boolean i2c_enabled = false;
+bool i2c_enabled = false;
 
 static void setupWire()
 {

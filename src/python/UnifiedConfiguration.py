@@ -10,7 +10,12 @@ from external import jmespath
 from firmware import TXType
 
 
-def findFirmwareEnd(f):
+def findFirmwareEnd(f, is_stm32=False):
+    if is_stm32:
+        # STM32 .bin is a raw binary, appended data goes at the end
+        f.seek(0, 2)
+        return f.tell()
+
     f.seek(0, 0)
     (magic, segments, _, _, _) = struct.unpack('<BBBBI', f.read(8))
     if magic != 0xe9:
@@ -35,10 +40,10 @@ def findFirmwareEnd(f):
         pos = pos + 32
     return pos
 
-def appendToFirmware(firmware_file, product_name, lua_name, defines, config, layout_file, rx_as_tx):
+def appendToFirmware(firmware_file, product_name, lua_name, defines, config, layout_file, rx_as_tx, is_stm32=False):
     product = (product_name.encode() + (b'\0' * 128))[0:128]
     device = (lua_name.encode() + (b'\0' * 16))[0:16]
-    end = findFirmwareEnd(firmware_file)
+    end = findFirmwareEnd(firmware_file, is_stm32=is_stm32)
     firmware_file.seek(end, 0)
     firmware_file.write(product)
     firmware_file.write(device)
@@ -215,7 +220,7 @@ def doConfiguration(file, defines, config, target_name, moduletype, frequency, p
         layout = f"hardware/{dir}/{config['layout_file']}"
 
     lua_name = lua_name if device_name is None else device_name
-    appendToFirmware(file, product_name, lua_name, defines, config, layout, rx_as_tx)
+    appendToFirmware(file, product_name, lua_name, defines, config, layout, rx_as_tx, is_stm32=(platform == 'stm32'))
 
 def appendConfiguration(source, target, env):
     target_name = env.get('PIOENV', '').upper()
@@ -239,6 +244,8 @@ def appendConfiguration(source, target, env):
             platform = 'esp32-s3'
         elif 'esp32-c3' in env.get('BOARD', ''):
             platform = 'esp32-c3'
+    elif env.get('PIOPLATFORM', '') == 'ststm32':
+        platform = 'stm32'
     else:
         platform = 'esp8285'
 

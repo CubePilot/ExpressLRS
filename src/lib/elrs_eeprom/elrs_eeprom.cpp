@@ -8,7 +8,11 @@
 void
 ELRS_EEPROM::Begin()
 {
+#if defined(PLATFORM_STM32)
+    EEPROM.begin();
+#else
     EEPROM.begin(RESERVED_EEPROM_SIZE);
+#endif
 }
 
 uint8_t
@@ -38,10 +42,14 @@ ELRS_EEPROM::WriteByte(const uint32_t address, const uint8_t value)
 void
 ELRS_EEPROM::Commit()
 {
+#if defined(PLATFORM_STM32)
+    // STM32 EEPROM emulation writes immediately, no commit needed
+#else
     if (!EEPROM.commit())
     {
       ERRLN("EEPROM commit failed");
     }
+#endif
 }
 
 #endif /* !TARGET_NATIVE */

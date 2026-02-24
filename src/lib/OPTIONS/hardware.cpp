@@ -2,7 +2,14 @@
 #include "options.h"
 #include "helpers.h"
 #include "logging.h"
+#if !defined(PLATFORM_STM32)
 #include <LittleFS.h>
+#endif
+#if defined(PLATFORM_STM32)
+#include "STM32_StreamString.h"
+#else
+#include <StreamString.h>
+#endif
 #include <ArduinoJson.h>
 
 typedef enum {
@@ -142,10 +149,11 @@ typedef union {
 } data_holder_t;
 
 static data_holder_t hardware[HARDWARE_LAST];
-static String builtinHardwareConfig;
+static StreamString builtinHardwareConfig;
 
 String& getHardware()
 {
+#if !defined(PLATFORM_STM32)
     File file = LittleFS.open("/hardware.json", "r");
     if (!file || file.isDirectory())
     {
@@ -158,6 +166,9 @@ String& getHardware()
     }
     builtinHardwareConfig = file.readString();
     return builtinHardwareConfig;
+#else
+    return builtinHardwareConfig;
+#endif
 }
 
 static void hardware_ClearAllFields()
@@ -222,8 +233,10 @@ bool hardware_init(EspFlashStream &strmFlash)
 
     Stream *strmSrc;
     JsonDocument doc;
+#if !defined(PLATFORM_STM32)
     File file = LittleFS.open("/hardware.json", "r");
     if (!file || file.isDirectory()) {
+#endif
         constexpr size_t hardwareConfigOffset = ELRSOPTS_PRODUCTNAME_SIZE + ELRSOPTS_DEVICENAME_SIZE + ELRSOPTS_OPTIONS_SIZE;
         strmFlash.setPosition(hardwareConfigOffset);
         if (!options_HasStringInFlash(strmFlash))
@@ -232,11 +245,13 @@ bool hardware_init(EspFlashStream &strmFlash)
         }
 
         strmSrc = &strmFlash;
+#if !defined(PLATFORM_STM32)
     }
     else
     {
         strmSrc = &file;
     }
+#endif
 
     DeserializationError error = deserializeJson(doc, *strmSrc);
     if (error)

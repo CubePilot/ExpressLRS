@@ -25,6 +25,10 @@
 #include "native.h"
 #endif
 
+#if defined(PLATFORM_STM32)
+#define IRAM_ATTR
+#endif
+
 /*
  * Features
  * define features based on pins before defining pins as UNDEF_PIN

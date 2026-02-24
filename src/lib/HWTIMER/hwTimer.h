@@ -94,6 +94,9 @@ public:
     static volatile bool running;
     static volatile bool isTick;
 
+#if defined(PLATFORM_STM32)
+    friend void timerCallback();
+#endif
 private:
     static void callback();
 

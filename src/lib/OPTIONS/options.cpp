@@ -29,8 +29,14 @@ char device_name[] = DEVICE_NAME;
 firmware_options_t firmwareOptions;
 #else
 #include <ArduinoJson.h>
+#if defined(PLATFORM_STM32)
+#include "STM32_StreamString.h"
+#else
 #include <StreamString.h>
+#endif
+#if !defined(PLATFORM_STM32)
 #include <LittleFS.h>
+#endif
 #if defined(PLATFORM_ESP32)
 #include <esp_partition.h>
 #include "esp_ota_ops.h"
@@ -97,9 +103,11 @@ void saveOptions(Stream &stream, bool customised)
 
 void saveOptions()
 {
+#if !defined(PLATFORM_STM32)
     File options = LittleFS.open("/options.json", "w");
     saveOptions(options, true);
     options.close();
+#endif
 }
 
 /**
@@ -142,6 +150,7 @@ static void options_LoadFromFlashOrFile(EspFlashStream &strmFlash)
         hasFlash = true;
     }
 
+#if !defined(PLATFORM_STM32)
     // load options.json from the SPIFFS partition
     File file = LittleFS.open("/options.json", "r");
     if (file && !file.isDirectory())
@@ -152,6 +161,7 @@ static void options_LoadFromFlashOrFile(EspFlashStream &strmFlash)
             hasSpiffs = true;
         }
     }
+#endif
 
     JsonDocument &doc = flashDoc;
     if (hasFlash && hasSpiffs)
@@ -213,6 +223,7 @@ static void options_LoadFromFlashOrFile(EspFlashStream &strmFlash)
 */
 void options_SetTrueDefaults()
 {
+#if !defined(PLATFORM_STM32)
     JsonDocument doc;
     // The Regulatory Domain is retained, as there is no sensible default
     doc["domain"] = firmwareOptions.domain;
@@ -221,6 +232,7 @@ void options_SetTrueDefaults()
     File options = LittleFS.open("/options.json", "w");
     serializeJson(doc, options);
     options.close();
+#endif
 }
 
 /**
@@ -259,21 +271,37 @@ bool options_init()
 {
     debugCreateInitLogger();
 
-    uint32_t baseAddr = 0;
 #if defined(PLATFORM_ESP32)
+    uint32_t baseAddr = 0;
     LittleFS.begin(true);
     const esp_partition_t *runningPart = esp_ota_get_running_partition();
     if (runningPart)
     {
         baseAddr = runningPart->address;
     }
+#elif defined(PLATFORM_STM32)
+    // STM32: no LittleFS, options loaded from flash-appended data only
 #else
+    uint32_t baseAddr = 0;
     LittleFS.begin();
     // ESP8266 sketch baseAddr is always 0
 #endif
 
     EspFlashStream strmFlash;
+#if defined(PLATFORM_STM32)
+    // STM32 flash is memory-mapped. Use linker symbol for end of firmware.
+    extern uint32_t _edata;
+    extern uint32_t _sidata;
+    // _sidata + (_edata - _sdata) gives end of initialized data in flash
+    // but _etext + size_of_data section is simpler:
+    // The appended data starts right after the firmware binary in flash.
+    // _sidata is the LMA (flash address) of .data, and its size is (_edata - _sdata)
+    extern uint32_t _sdata;
+    uint32_t firmwareEnd = (uint32_t)&_sidata + ((uint32_t)&_edata - (uint32_t)&_sdata);
+    strmFlash.setBaseAddress(firmwareEnd);
+#else
     strmFlash.setBaseAddress(baseAddr + ESP.getSketchSize());
+#endif
 
     // Product / Device Name
     options_LoadProductAndDeviceName(strmFlash);
@@ -282,7 +310,11 @@ bool options_init()
     // hardware.json
     bool hasHardware = hardware_init(strmFlash);
     // flash location of logo image in RGB565 format
+#if defined(PLATFORM_STM32)
+    logo_image = firmwareEnd +
+#else
     logo_image = baseAddr + ESP.getSketchSize() +
+#endif
         ELRSOPTS_PRODUCTNAME_SIZE +
         ELRSOPTS_DEVICENAME_SIZE +
         ELRSOPTS_OPTIONS_SIZE +

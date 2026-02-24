@@ -1,4 +1,6 @@
 #include "targets.h"
+
+#if !defined(PLATFORM_STM32)
 #include "common.h"
 #include "devLED.h"
 
@@ -469,3 +471,4 @@ device_t RGB_device = {
     .timeout = timeout,
     .subscribe = EVENT_CONNECTION_CHANGED | EVENT_ENTER_BIND_MODE | EVENT_EXIT_BIND_MODE
 };
+#endif // !PLATFORM_STM32
