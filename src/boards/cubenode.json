@@ -19,7 +19,8 @@
   "name": "CubeNode (STM32H757II)",
   "upload": {
     "maximum_ram_size": 524288,
-    "maximum_size": 2097152,
+    "maximum_size": 1048576,
+    "offset_address": "0x08000000",
     "protocol": "stlink",
     "protocols": [
       "stlink",

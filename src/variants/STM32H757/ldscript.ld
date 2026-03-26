@@ -31,11 +31,11 @@
 /* Entry Point */
 ENTRY(Reset_Handler)
 
-/* Highest address of the user mode stack */
-_estack = ORIGIN(RAM_D1) + LENGTH(RAM_D1);	/* end of "RAM_D1" Ram type memory */
+/* Stack and heap both in DTCM so _sbrk works (it checks heap against MSP) */
+_estack = ORIGIN(DTCMRAM) + LENGTH(DTCMRAM);	/* end of DTCM (0x20020000) */
 
-_Min_Heap_Size = 0x200;	/* required amount of heap  */
-_Min_Stack_Size = 0x400;	/* required amount of stack */
+_Min_Heap_Size = 0x4000;	/* 16KB heap */
+_Min_Stack_Size = 0x4000;	/* 16KB stack */
 
 /* Specify the memory areas */
 MEMORY
@@ -116,7 +116,7 @@ SECTIONS
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 
-  /* Initialized data sections into "RAM_D1" Ram type memory */
+  /* Initialized data sections into DTCMRAM */
   .data :
   {
     . = ALIGN(4);
@@ -129,9 +129,9 @@ SECTIONS
     . = ALIGN(4);
     _edata = .;        /* define a global symbol at data end */
 
-  } >RAM_D1 AT> FLASH
+  } >DTCMRAM AT> FLASH
 
-  /* Uninitialized data section into "RAM_D1" Ram type memory */
+  /* Uninitialized data section into DTCMRAM */
   . = ALIGN(4);
   .bss :
   {
@@ -145,9 +145,9 @@ SECTIONS
     . = ALIGN(4);
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end__ = _ebss;
-  } >RAM_D1
+  } >DTCMRAM
 
-  /* User_heap_stack section, used to check that there is enough "RAM_D1" Ram  type memory left */
+  /* Heap and stack in DTCMRAM - same region so _sbrk works */
   ._user_heap_stack :
   {
     . = ALIGN(8);
@@ -156,7 +156,7 @@ SECTIONS
     . = . + _Min_Heap_Size;
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
-  } >RAM_D1
+  } >DTCMRAM
 
   /* Remove information from the standard libraries */
   /DISCARD/ :

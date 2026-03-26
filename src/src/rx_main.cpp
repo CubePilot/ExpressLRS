@@ -119,6 +119,16 @@ unsigned long rebootTime = 0;
 #if !defined(PLATFORM_STM32)
 extern bool webserverPreventAutoStart;
 #endif
+#if defined(PLATFORM_STM32) && defined(STM32H7xx)
+extern "C" void cubenode_reset_into_dfu(void);
+#endif
+static volatile struct {
+    uint8_t raw[8];
+    uint8_t type;
+    uint8_t nonce;
+    bool pending;
+} crcErrLog;
+
 bool pwmSerialDefined = false;
 uint32_t serialBaud;
 
@@ -1110,7 +1120,14 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
 
     if (!OtaValidatePacketCrc(otaPktPtr))
     {
-        DBGVLN("CRC error");
+        uint8_t *r = (uint8_t *)otaPktPtr;
+        if (!crcErrLog.pending)
+        {
+            for (int i = 0; i < 8; i++) crcErrLog.raw[i] = r[i];
+            crcErrLog.type = r[0] & 0x03;
+            crcErrLog.nonce = OtaNonce;
+            crcErrLog.pending = true;
+        }
         #if defined(DEBUG_RX_SCOREBOARD)
             lastPacketCrcError = true;
         #endif
@@ -1405,10 +1422,21 @@ static void setupSerial()
         serialIO = new SerialCRSF(SERIAL_PROTOCOL_TX, SERIAL_PROTOCOL_RX);
     }
 
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    SerialUSB.begin(460800);
+    /* USB CRSF connector disabled for debugging
+    extern SerialIO *usbSerialIO;
+    static SerialCRSF usbCRSF(SerialUSB, SerialUSB);
+    usbSerialIO = &usbCRSF;
+    */
+#endif
+
 #if defined(DEBUG_ENABLED)
 #if defined(PLATFORM_ESP32_S3) || defined(PLATFORM_ESP32_C3)
     USBSerial.begin(460800);
     BackpackOrLogStrm = &USBSerial;
+#elif defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    BackpackOrLogStrm = &SerialUSB;
 #else
     BackpackOrLogStrm = &Serial;
 #endif
@@ -1589,6 +1617,10 @@ static void setupRadio()
     ChannelDataReset();
 
     Radio.currFreq = FHSSgetInitialFreq();
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    SerialUSB.printf("InitFreq=%u MinFreq=%u MaxFreq=%u CrcInit=0x%04X OtaVer=%d\r\n",
+        Radio.currFreq, FHSSgetMinimumFreq(), FHSSgetMaximumFreq(), OtaCrcInitializer, OTA_VERSION_ID);
+#endif
 #if defined(RADIO_SX127X)
     //Radio.currSyncWord = UID[3];
 #endif
@@ -2006,6 +2038,16 @@ void resetConfigAndReboot()
 
 void setup()
 {
+#ifdef DBG_PIN_PORT
+    DBG_PIN_INIT();
+#endif
+#ifdef DBG2_PIN_PORT
+    DBG2_PIN_INIT();
+#endif
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    SerialUSB.begin(460800);
+    delay(5000);
+#endif
     if (!options_init())
     {
         // In the failure case we set the logging to the null logger so nothing crashes
@@ -2038,8 +2080,13 @@ void setup()
         // pre-initialise serial must be done before anything as some libs write
         // to the serial port and they'll block if the buffer fills
         #if defined(DEBUG_LOG)
+        #if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+        SerialUSB.begin(serialBaud);
+        BackpackOrLogStrm = &SerialUSB;
+        #else
         Serial.begin(serialBaud);
         BackpackOrLogStrm = &Serial;
+        #endif
         #else
         BackpackOrLogStrm = new NullStream();
         #endif
@@ -2102,6 +2149,30 @@ void loop()
 #endif
 {
     unsigned long now = millis();
+
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    if (crcErrLog.pending)
+    {
+        SerialUSB.printf("CRC err t=%d n=%d: %d %d %d %d %d %d %d %d\r\n",
+            crcErrLog.type, crcErrLog.nonce,
+            crcErrLog.raw[0], crcErrLog.raw[1], crcErrLog.raw[2], crcErrLog.raw[3],
+            crcErrLog.raw[4], crcErrLog.raw[5], crcErrLog.raw[6], crcErrLog.raw[7]);
+        crcErrLog.pending = false;
+    }
+    {
+        static uint32_t lastLinkPrint = 0;
+        if (connectionState == connected && now - lastLinkPrint > 1000)
+        {
+            lastLinkPrint = now;
+            SerialUSB.printf("RSSI=%d/%d LQ=%d/%d SNR=%d/%d mode=%d conn=%d ant=%d txpwr=%d\r\n",
+                linkStats.uplink_RSSI_1, linkStats.downlink_RSSI_2,
+                linkStats.uplink_Link_quality, linkStats.downlink_Link_quality, linkStats.uplink_SNR,
+                linkStats.downlink_SNR,
+                linkStats.rf_Mode, connectionState,
+                linkStats.active_antenna, linkStats.uplink_TX_Power);
+        }
+    }
+#endif
 
     if (DataUlReceiver.HasFinishedData())
     {
@@ -2226,6 +2297,10 @@ void reset_into_bootloader(void)
     setConnectionState(serialUpdate);
 #elif defined(PLATFORM_STM32)
     delay(100);
+#if defined(STM32H7xx)
+    cubenode_reset_into_dfu();
+#else
     NVIC_SystemReset();
+#endif
 #endif
 }

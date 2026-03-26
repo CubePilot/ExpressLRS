@@ -6,6 +6,7 @@ from typing import NamedTuple
 class MCUType(Enum):
     ESP32 = 0
     ESP8266 = 1
+    STM32 = 2
 
 class DeviceType(Enum):
     TX = 0

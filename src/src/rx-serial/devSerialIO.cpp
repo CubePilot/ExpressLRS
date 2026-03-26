@@ -265,6 +265,10 @@ void sendImmediateRC()
 #endif
 }
 
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+SerialIO *usbSerialIO = nullptr;
+#endif
+
 void handleSerialIO()
 {
     // still get telemetry and send link stats if there's no model match
@@ -278,6 +282,13 @@ void handleSerialIO()
     {
         (*(serial1.io))->processSerialInput();
         (*(serial1.io))->sendQueuedData((*(serial1.io))->getMaxSerialWriteSize());
+    }
+#endif
+#if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
+    if (usbSerialIO != nullptr)
+    {
+        usbSerialIO->processSerialInput();
+        usbSerialIO->sendQueuedData(usbSerialIO->getMaxSerialWriteSize());
     }
 #endif
 }

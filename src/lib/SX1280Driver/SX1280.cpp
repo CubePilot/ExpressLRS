@@ -443,6 +443,7 @@ void ICACHE_RAM_ATTR SX1280Driver::TXnbISR()
 
 void ICACHE_RAM_ATTR SX1280Driver::TXnb(uint8_t * data, bool sendGeminiBuffer, uint8_t * dataGemini, SX12XX_Radio_Number_t radioNumber)
 {
+    // DBG2_PIN_TOGGLE();  // [DBG2] DIO1 ISR entry
     transmittingRadio = radioNumber;
 
     //catch TX timeout
@@ -502,6 +503,7 @@ void ICACHE_RAM_ATTR SX1280Driver::TXnb(uint8_t * data, bool sendGeminiBuffer, u
 #ifdef DEBUG_SX1280_OTA_TIMING
     beginTX = micros();
 #endif
+    // DBG2_PIN_TOGGLE();  // [DBG2] DIO1 ISR entry
 }
 
 bool ICACHE_RAM_ATTR SX1280Driver::RXnbISR(uint16_t irqStatus, SX12XX_Radio_Number_t radioNumber)
@@ -516,11 +518,18 @@ bool ICACHE_RAM_ATTR SX1280Driver::RXnbISR(uint16_t irqStatus, SX12XX_Radio_Numb
     }
     if (fail == SX12XX_RX_OK)
     {
+        // DBG_PIN_TOGGLE();   // [DBG] step 3a: GetRxBufferAddr start
         uint8_t const FIFOaddr = GetRxBufferAddr(radioNumber);
+        // DBG_PIN_TOGGLE();   // [DBG] step 3b: ReadBuffer start
+        // DBG_PIN_TOGGLE();   // [DBG] step 3b: ReadBuffer start
         hal.ReadBuffer(FIFOaddr, RXdataBuffer, PayloadLength, radioNumber);
+        // DBG_PIN_TOGGLE();   // [DBG] step 3c: ReadBuffer done
     }
 
-    return RXdoneCallback(fail);
+    // DBG_PIN_TOGGLE();   // [DBG] step 3d: RXdoneCallback start
+    bool result = RXdoneCallback(fail);
+    // DBG_PIN_TOGGLE();   // [DBG] step 3e: RXdoneCallback done
+    return result;
 }
 
 void ICACHE_RAM_ATTR SX1280Driver::RXnb()
@@ -698,21 +707,26 @@ void ICACHE_RAM_ATTR SX1280Driver::IsrCallback(SX12XX_Radio_Number_t radioNumber
     instance->processingPacketRadio = radioNumber;
     SX12XX_Radio_Number_t irqClearRadio = radioNumber;
 
+    DBG_PIN_TOGGLE();   // [DBG] step 1: GetIrqStatus start
     uint16_t irqStatus = instance->GetIrqStatus(radioNumber);
+    DBG_PIN_TOGGLE();   // [DBG] step 2: GetIrqStatus done
+
     if (irqStatus & SX1280_IRQ_TX_DONE)
     {
+        // DBG2_PIN_TOGGLE();   // [DBG] step 3: TX done start
         RFAMP.TXRXdisable();
         instance->TXnbISR();
         irqClearRadio = SX12XX_Radio_All;
+        // DBG2_PIN_TOGGLE();   // [DBG] step 3: TX done start
     }
     else if (irqStatus & SX1280_IRQ_RX_DONE)
     {
         if (instance->RXnbISR(irqStatus, radioNumber))
         {
-            irqClearRadio = SX12XX_Radio_All; // Packet received so clear all radios and dont spend extra time retrieving data.
+            irqClearRadio = SX12XX_Radio_All;
         }
 #if defined(DEBUG_RCVR_SIGNAL_STATS)
-        else
+        if (irqClearRadio != SX12XX_Radio_All)
         {
             instance->rxSignalStats[(radioNumber == SX12XX_Radio_1) ? 0 : 1].fail_count++;
         }
@@ -722,5 +736,7 @@ void ICACHE_RAM_ATTR SX1280Driver::IsrCallback(SX12XX_Radio_Number_t radioNumber
     {
         return;
     }
+    DBG_PIN_TOGGLE();   // [DBG] step 5: ClearIrqStatus start
     instance->ClearIrqStatus(SX1280_IRQ_RADIO_ALL, irqClearRadio);
+    DBG_PIN_TOGGLE();   // [DBG] step 6: ClearIrqStatus done
 }

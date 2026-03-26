@@ -25,9 +25,19 @@ void SerialIO::sendQueuedData(uint32_t maxBytesToSend)
         uint8_t OutData[OutPktLen];
         _fifo.popBytes(OutData, OutPktLen);
         _fifo.unlock();
+#if defined(PLATFORM_STM32)
+        // Use BASEPRI instead of PRIMASK to block low-priority ISRs
+        // while still allowing UART TX ISR to drain the buffer.
+        // Block priority >= 0x20 (allows USART6 at 0x10 through)
+        uint32_t savedBasepri = __get_BASEPRI();
+        __set_BASEPRI(0x20);
+        this->_outputPort->write(OutData, OutPktLen);
+        __set_BASEPRI(savedBasepri);
+#else
         noInterrupts();
-        this->_outputPort->write(OutData, OutPktLen); // write the packet out
+        this->_outputPort->write(OutData, OutPktLen);
         interrupts();
+#endif
         bytesWritten += OutPktLen;
     }
 }

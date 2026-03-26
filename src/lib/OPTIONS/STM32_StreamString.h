@@ -12,11 +12,17 @@
 
 class StreamString : public Stream, public String {
 public:
-    size_t write(const uint8_t *buffer, size_t size) override {
-        for (size_t i = 0; i < size; i++) {
-            concat((char)buffer[i]);
+    size_t write(const uint8_t *data, size_t size) override {
+        if (size && data) {
+            const unsigned int newlen = len + size;
+            if (reserve(newlen + 1)) {
+                memcpy(buffer + len, data, size);
+                len = newlen;
+                *(buffer + newlen) = 0x00;
+                return size;
+            }
         }
-        return size;
+        return 0;
     }
 
     size_t write(uint8_t data) override {

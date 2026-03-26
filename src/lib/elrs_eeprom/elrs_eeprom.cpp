@@ -36,14 +36,19 @@ ELRS_EEPROM::WriteByte(const uint32_t address, const uint8_t value)
         ERRLN("EEPROM address is out of bounds");
         return;
     }
+#if defined(PLATFORM_STM32)
+    // Use buffered write to avoid flash erase+reprogram per byte
+    eeprom_buffered_write_byte(address, value);
+#else
     EEPROM.write(address, value);
+#endif
 }
 
 void
 ELRS_EEPROM::Commit()
 {
 #if defined(PLATFORM_STM32)
-    // STM32 EEPROM emulation writes immediately, no commit needed
+    eeprom_buffer_flush();
 #else
     if (!EEPROM.commit())
     {

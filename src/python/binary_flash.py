@@ -7,6 +7,7 @@ import os
 from elrs_helpers import ElrsUploadResult
 import BFinitPassthrough
 import ETXinitPassthrough
+import bootloader
 import serials_find
 import upload_via_esp8266_backpack
 from firmware import DeviceType, FirmwareOptions, MCUType
@@ -26,6 +27,7 @@ class UploadMethod(Enum):
     stlink = 'stlink'
     stock = 'stock'
     dir = 'dir'
+    dfu = 'dfu'
 
     def __str__(self):
         return self.value
@@ -117,6 +119,48 @@ def upload_esp32_bf(args, options):
         return ElrsUploadResult.ErrorGeneral
     return ElrsUploadResult.Success
 
+def reboot_to_dfu(port):
+    """Send CRSF bootloader command over serial to reboot into DFU mode."""
+    import serial
+    import time
+    try:
+        print("Sending reboot-to-DFU command on %s..." % port)
+        s = serial.Serial(port=port, baudrate=460800, timeout=2)
+        seq = bootloader.get_init_seq()
+        s.write(seq)
+        s.flush()
+        s.close()
+        print("Waiting for DFU device...")
+        time.sleep(3)
+    except Exception as e:
+        print("Could not send reboot command: %s" % str(e))
+        print("Put the device in DFU mode manually (BOOT0 + reset)")
+
+def upload_dfu(args):
+    import subprocess
+    import time
+
+    # Try to reboot into DFU via serial first
+    if args.port:
+        reboot_to_dfu(args.port)
+    else:
+        # Find any USB CDC serial port without FC detection
+        import serial.tools.list_ports
+        stm_ports = [p.device for p in serial.tools.list_ports.comports()
+                     if p.vid == 0x0483 or (p.vid == 0x2DAE and p.pid == 0x1016)]
+        if stm_ports:
+            reboot_to_dfu(stm_ports[0])
+        else:
+            print("No serial port found. Assuming device is already in DFU mode.")
+
+    import stm32_dfu
+    try:
+        stm32_dfu.flash(args.file.name, 0x08000000)
+        return ElrsUploadResult.Success
+    except Exception as e:
+        print("DFU flash failed: %s" % str(e))
+        return ElrsUploadResult.ErrorGeneral
+
 def upload_dir(mcuType, args):
     if mcuType == MCUType.ESP8266:
         shutil.copy2('firmware.bin.gz', os.path.join(args.out, 'firmware.bin.gz'))
@@ -129,7 +173,9 @@ def upload(options: FirmwareOptions, args):
         if args.flash == UploadMethod.betaflight:
             args.baud = 420000
 
-    if args.flash == UploadMethod.dir or args.flash == UploadMethod.stock:
+    if args.flash == UploadMethod.dfu:
+        return upload_dfu(args)
+    elif args.flash == UploadMethod.dir or args.flash == UploadMethod.stock:
         return upload_dir(options.mcuType, args)
     elif options.deviceType == DeviceType.RX:
         if options.mcuType == MCUType.ESP8266:
