@@ -1,3 +1,6 @@
+#ifdef CUBERACER_M4
+#include "receiver_link.h"
+#endif
 #include "CRSFRouter.h"
 #include "LowPassFilter.h"
 #include "rxtx_common.h"
@@ -2039,6 +2042,7 @@ void resetConfigAndReboot()
 void setup()
 {
 #if defined(CUBERACER_M4_RADIO_DISABLED)
+    elrsCfInit();
     return; // Checkpoint A: no EEPROM, GPIO, UART or radio initialization.
 #endif
 #ifdef DBG_PIN_PORT
@@ -2152,6 +2156,7 @@ void loop()
 #endif
 {
 #if defined(CUBERACER_M4_RADIO_DISABLED)
+    elrsCfPoll(micros());
     __WFI();
     return;
 #endif

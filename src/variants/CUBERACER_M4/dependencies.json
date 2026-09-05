@@ -3,5 +3,8 @@
   "platformio": "6.1.18",
   "ststm32": "19.5.0",
   "framework-arduinoststm32": "bdea44d918a8c508eb6b526731e29924816de84a",
-  "toolchain-gccarmnoneeabi": "1.120301.0"
+  "toolchain-gccarmnoneeabi": "1.120301.0",
+  "cubeframework": "e8878c7b2661f857c2b45da4e837c26044edabfb",
+  "protobuf": "7.36.1",
+  "grpcio-tools": "1.83.1"
 }

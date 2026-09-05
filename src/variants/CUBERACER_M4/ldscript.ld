@@ -140,6 +140,14 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
+  /* Retained M4 identity is private and outside both BSS clearing and heap. */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(8);
+    *(.noinit*)
+    . = ALIGN(8);
+  } >RAM
+
   /* Heap and stack in RAM - same region so _sbrk works */
   ._user_heap_stack :
   {
