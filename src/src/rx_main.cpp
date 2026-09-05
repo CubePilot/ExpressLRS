@@ -2038,6 +2038,9 @@ void resetConfigAndReboot()
 
 void setup()
 {
+#if defined(CUBERACER_M4_RADIO_DISABLED)
+    return; // Checkpoint A: no EEPROM, GPIO, UART or radio initialization.
+#endif
 #ifdef DBG_PIN_PORT
     DBG_PIN_INIT();
 #endif
@@ -2148,6 +2151,10 @@ void main_loop()
 void loop()
 #endif
 {
+#if defined(CUBERACER_M4_RADIO_DISABLED)
+    __WFI();
+    return;
+#endif
     unsigned long now = millis();
 
 #if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
@@ -2297,7 +2304,9 @@ void reset_into_bootloader(void)
     setConnectionState(serialUpdate);
 #elif defined(PLATFORM_STM32)
     delay(100);
-#if defined(STM32H7xx)
+#if defined(CUBERACER_M4)
+    return; // Whole-chip ROM DFU is owned by the M7 deployment path.
+#elif defined(STM32H7xx)
     cubenode_reset_into_dfu();
 #else
     NVIC_SystemReset();

@@ -2,7 +2,8 @@
 #include "targets.h"
 #include "logging.h"
 
-#if !defined(TARGET_NATIVE)
+// Integrated M4 deliberately has no local persistent-storage implementation.
+#if !defined(TARGET_NATIVE) && !defined(CUBERACER_M4)
 #include <EEPROM.h>
 
 void
@@ -58,3 +59,11 @@ ELRS_EEPROM::Commit()
 }
 
 #endif /* !TARGET_NATIVE */
+#if defined(CUBERACER_M4)
+// Checkpoint A has no persistence adapter yet. Fail closed if a legacy callback
+// reaches this API; never erase M7 configuration or pretend a save succeeded.
+void ELRS_EEPROM::Begin() { __builtin_trap(); }
+uint8_t ELRS_EEPROM::ReadByte(uint32_t) { __builtin_trap(); }
+void ELRS_EEPROM::WriteByte(uint32_t, uint8_t) { __builtin_trap(); }
+void ELRS_EEPROM::Commit() { __builtin_trap(); }
+#endif

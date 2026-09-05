@@ -1,0 +1,7 @@
+{
+  "expresslrs_base": "b89668d5797d89ddc5949c30924a82258a40cd4c",
+  "platformio": "6.1.18",
+  "ststm32": "19.5.0",
+  "framework-arduinoststm32": "bdea44d918a8c508eb6b526731e29924816de84a",
+  "toolchain-gccarmnoneeabi": "1.120301.0"
+}

@@ -1,0 +1,34 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DSTM32H7xx -DSTM32H757xx -DCORE_CM4",
+    "f_cpu": "240000000L",
+    "mcu": "stm32h757iik6",
+    "product_line": "STM32H757xx",
+    "variant": "CUBERACER_M4",
+    "arduino": {
+      "variant_h": "variant_CUBERACER_M4.h"
+    }
+  },
+  "debug": {
+    "jlink_device": "STM32H757II_M4",
+    "openocd_target": "stm32h7x_dual_bank",
+    "svd_path": "STM32H757_CM4.svd"
+  },
+  "frameworks": [
+    "arduino"
+  ],
+  "name": "CubeRacer STM32H757 M4 receiver",
+  "upload": {
+    "maximum_ram_size": 131072,
+    "maximum_size": 524288,
+    "offset_address": "0x08180000",
+    "protocol": "custom",
+    "protocols": [
+      "custom"
+    ]
+  },
+  "url": "https://github.com/ExpressLRS",
+  "vendor": "CubePilot"
+}

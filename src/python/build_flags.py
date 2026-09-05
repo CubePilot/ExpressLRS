@@ -137,8 +137,10 @@ def cleanDefaultProductForTarget(target_name: str) -> None:
 json_flags['flash-discriminator'] = randint(1,2**32-1)
 json_flags['wifi-on-interval'] = -1
 
-process_flags("user_defines.txt")
-process_flags("super_defines.txt") # allow secret super_defines to override user_defines
+# The integrated receiver obtains all settings from Betaflight, including UID.
+if target_name != "UNIFIED_CUBERACER_2400_RX_M4":
+    process_flags("user_defines.txt")
+    process_flags("super_defines.txt") # allow secret super_defines to override user_defines
 version_to_env()
 build_flags.append("-DLATEST_COMMIT=" + get_git_sha())
 build_flags.append("-DLATEST_VERSION=" + get_version())

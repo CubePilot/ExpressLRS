@@ -15,12 +15,21 @@ volatile int32_t hwTimer::FreqOffset = 0;
 static volatile uint32_t PauseDuration;
 static bool alreadyInit = false;
 
+#if defined(CUBERACER_M4)
+// No peripheral accesses from static constructors, before M7 grants ownership.
+static HardwareTimer deferredTimer;
+static HardwareTimer *MyTim = &deferredTimer;
+#else
 static HardwareTimer *MyTim = new HardwareTimer(TIM1);
+#endif
 
 void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
 {
     if (!alreadyInit)
     {
+#if defined(CUBERACER_M4)
+        MyTim->setup(TIM1);
+#endif
         hwTimer::callbackTick = callbackTick;
         hwTimer::callbackTock = callbackTock;
         MyTim->attachInterrupt(hwTimer::callback);
