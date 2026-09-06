@@ -112,6 +112,29 @@ void test_volatile_binding_then_durable_edit_keeps_session_uid() {
     TEST_ASSERT_EQUAL(CF_RX_OK,client.apply(3,3,3,settings,1000));
     TEST_ASSERT_EQUAL(20,client.settings().boundUid[0]);TEST_ASSERT_TRUE(client.ready(1000));
 }
+void test_arming_between_save_confirmation_and_apply_defers_adoption() {
+    settings.modelId=17;TEST_ASSERT_EQUAL(CF_RX_PENDING,client.request(settings,false,1000));
+    ElrsCfProposal proposal{};TEST_ASSERT_TRUE(client.proposal(1000,&proposal));
+    client.result(proposal.transaction,CF_RX_OK,2,2);
+    client.authorize(true,true,2000,true);
+    TEST_ASSERT_EQUAL(CF_RX_ARMED,client.apply(2,2,2,settings,2000));
+    TEST_ASSERT_EQUAL(255,client.settings().modelId);TEST_ASSERT_FALSE(client.ready(2000));
+    client.authorize(true,false,3000,true);
+    TEST_ASSERT_EQUAL(CF_RX_OK,client.apply(2,2,2,settings,3000));
+    TEST_ASSERT_EQUAL(17,client.settings().modelId);TEST_ASSERT_TRUE(client.ready(3000));
+}
+void test_lost_save_ack_retries_identical_proposal_without_adopting_early_apply() {
+    settings.modelId=17;TEST_ASSERT_EQUAL(CF_RX_PENDING,client.request(settings,false,1000));
+    ElrsCfProposal first{},retry{};TEST_ASSERT_TRUE(client.proposal(1000,&first));
+    TEST_ASSERT_EQUAL(CF_RX_PENDING,client.apply(2,2,2,settings,2000));
+    TEST_ASSERT_EQUAL(255,client.settings().modelId);TEST_ASSERT_FALSE(client.ready(2000));
+    client.authorize(true,false,251000,true);TEST_ASSERT_TRUE(client.proposal(251000,&retry));
+    TEST_ASSERT_EQUAL(first.transaction,retry.transaction);TEST_ASSERT_EQUAL(first.revision,retry.revision);
+    TEST_ASSERT_EQUAL_MEMORY(&first.settings,&retry.settings,sizeof first.settings);
+    client.result(retry.transaction,CF_RX_OK,2,2);
+    TEST_ASSERT_EQUAL(CF_RX_OK,client.apply(2,2,2,settings,251000));
+    TEST_ASSERT_TRUE(client.ready(251000));
+}
 int main() {
     UNITY_BEGIN();RUN_TEST(test_binding_modes_and_home_loan);RUN_TEST(test_persistence_ack_must_precede_binding_completion);
     RUN_TEST(test_fresh_disarmed_authorization_and_runtime_readiness);RUN_TEST(test_retry_failure_and_restart_do_not_assume_saved);
@@ -120,5 +143,7 @@ int main() {
     RUN_TEST(test_volatile_uid_is_removed_from_other_persistent_proposals);
     RUN_TEST(test_restart_before_ack_requires_authoritative_settings);
     RUN_TEST(test_volatile_binding_then_durable_edit_keeps_session_uid);
+    RUN_TEST(test_arming_between_save_confirmation_and_apply_defers_adoption);
+    RUN_TEST(test_lost_save_ack_retries_identical_proposal_without_adopting_early_apply);
     return UNITY_END();
 }
