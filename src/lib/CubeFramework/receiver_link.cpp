@@ -1,6 +1,7 @@
 #ifdef CUBERACER_M4
 #include "receiver_link.h"
 #include "receiver_config.h"
+#include "receiver_rc.h"
 #include <Arduino.h>
 #include <CubePilotFW/ReceiverEndpoint.h>
 #include <CubePilotFW/ReceiverLayout.h>
@@ -16,6 +17,9 @@ volatile BootRecord record __attribute__((section(".noinit.cuberacer_boot")));
 constexpr uint32_t BOOT_MAGIC=0x43525831;
 ReceiverEndpoint endpoint;
 ElrsCfConfigClient client;
+ElrsCfRcPublisher rcPublisher;
+cfRxStatus_t radioStatus{};
+uint32_t lastStatus=0;
 struct Guard {
     Guard() { cubefw_pal_criticalEnter(); }
     ~Guard() { cubefw_pal_criticalExit(); }
@@ -123,6 +127,17 @@ cfRxResult_e elrsCfSettingsResult(void)
     if (client.binding()) return CF_RX_PENDING;
     return userResult==CF_RX_PENDING ? client.lastResult() : userResult;
 }
+void elrsCfPublishChannels(bool available,bool modelMatch,bool inhibited,const uint32_t *channels)
+{
+    Guard guard;
+    const uint32_t now=micros();
+    rcPublisher.configure(client.session(),client.revision(),client.ready(now) && !peerRequestPending && !awaitingCommand);
+    rcPublisher.publish(available,modelMatch,inhibited,channels,now);
+}
+void elrsCfPublishStats(const cfRxStatus_t *status)
+{
+    if (status) { Guard guard;radioStatus=*status; }
+}
 void elrsCfPoll(uint32_t nowUs)
 {
     if (!active) return;
@@ -132,7 +147,7 @@ void elrsCfPoll(uint32_t nowUs)
     {
         Guard guard;
         if (previous!=endpoint.session().session()) {
-            client.reset(endpoint.session().session());ackPending=false;rateHint=255;runtimeRefresh=false;
+            client.reset(endpoint.session().session());radioStatus={};ackPending=false;rateHint=255;runtimeRefresh=false;
             lastCommandTransaction=0;lastCommandPending=false;
             peerRequestPending=awaitingCommand=false;peerRequestTransaction=0;
             lastCapabilities=nowUs-1000000U;
@@ -140,6 +155,16 @@ void elrsCfPoll(uint32_t nowUs)
         client.authorize(endpoint.session().receiverEnabled(),endpoint.session().peerArmed(),
             endpoint.session().lastControlUs(),endpoint.session().linked(nowUs));
     }
+    // RC has priority over control and telemetry. The ISR only stages native
+    // data; protobuf and HSEM work are bounded main-loop operations.
+    cfRxFrame_t rcFrame;
+    bool haveRc;
+    {
+        Guard guard;
+        rcPublisher.configure(client.session(),client.revision(),client.ready(nowUs) && !peerRequestPending && !awaitingCommand);
+        haveRc=rcPublisher.snapshot(nowUs,&rcFrame);
+    }
+    if (haveRc && !endpoint.sendFrame(rcFrame,nowUs)) { Guard guard;rcPublisher.sent(rcFrame.sequence); }
     sendAck();
     CubePilotFW_ReceiverControlEnvelope event;
     if (!ackPending && endpoint.takeControlEvent(&event,nowUs)) {
@@ -245,6 +270,22 @@ void elrsCfPoll(uint32_t nowUs)
 #endif
         strcpy(caps.firmware,"ExpressLRS CubeRacer M4");
         if (!endpoint.sendControl(envelope)) lastCapabilities=nowUs;
+    }
+    if (!ackPending && endpoint.session().linked(nowUs) && uint32_t(nowUs-lastStatus)>=100000U) {
+        cfRxStatus_t status;
+        {
+            Guard guard;status=radioStatus;status.session=client.session();status.revision=client.revision();
+            status.persistedRevision=client.persistedRevision();status.rcDrops=rcPublisher.drops();
+            status.state=client.ready(nowUs) && !peerRequestPending && !awaitingCommand ? 3 : 2;
+        }
+        CubePilotFW_ReceiverControlEnvelope envelope=CubePilotFW_ReceiverControlEnvelope_init_zero;
+        envelope.which_payload=CubePilotFW_ReceiverControlEnvelope_status_tag;
+        auto &wire=envelope.payload.status;
+        wire.session=status.session;wire.revision=status.revision;wire.persistedRevision=status.persistedRevision;
+        wire.rcDrops=status.rcDrops;wire.protocolErrors=endpoint.errors();wire.packetRateHz=status.packetRateHz;
+        wire.rssiDbm=status.rssiDbm;wire.snr=status.snr;wire.linkQuality=status.linkQuality;
+        wire.antenna=status.antenna;wire.power=status.power;wire.state=status.state;
+        if (!endpoint.sendControl(envelope)) lastStatus=nowUs;
     }
 }
 #endif

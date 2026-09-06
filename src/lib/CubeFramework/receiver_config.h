@@ -28,6 +28,7 @@ public:
     cfRxResult_e canChange(uint32_t nowUs) const;
     bool binding() const { return binding_; }
     bool pending() const { return pending_; }
+    uint32_t session() const { return session_; }
     uint32_t revision() const { return revision_; }
     uint32_t persistedRevision() const { return persistedRevision_; }
     const cfRxSettings_t &settings() const { return settings_; }

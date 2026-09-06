@@ -4,7 +4,7 @@
   "ststm32": "19.5.0",
   "framework-arduinoststm32": "bdea44d918a8c508eb6b526731e29924816de84a",
   "toolchain-gccarmnoneeabi": "1.120301.0",
-  "cubeframework": "d6b4ebd6c2fb1f0f129b8c18c121d33bbdfe075a",
+  "cubeframework": "d22739051befe1da9a2306b139a2c1b2f43830df",
   "protobuf": "7.36.1",
   "grpcio-tools": "1.83.1"
 }

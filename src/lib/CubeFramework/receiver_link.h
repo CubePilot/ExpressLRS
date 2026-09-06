@@ -25,3 +25,6 @@ cfRxResult_e elrsCfRuntimeCommand(cfRxCommand_e command);
 
 cfRxResult_e elrsCfRequestCommand(cfRxCommand_e command);
 cfRxResult_e elrsCfMutationAuthorization(void);
+
+void elrsCfPublishChannels(bool available,bool modelMatch,bool inhibited,const uint32_t *channels);
+void elrsCfPublishStats(const cfRxStatus_t *status);

@@ -21,6 +21,9 @@
 #include "rx-serial/SerialIO.h"
 #include "rx-serial/SerialNOOP.h"
 #include "rx-serial/SerialCRSF.h"
+#ifdef CUBERACER_M4
+#include "rx-serial/SerialCubeFramework.h"
+#endif
 #include "rx-serial/SerialSBUS.h"
 #include "rx-serial/SerialSUMD.h"
 #include "rx-serial/SerialAirPort.h"
@@ -1289,6 +1292,12 @@ void DataUlReceiveComplete()
 
 static void setupSerial()
 {
+#ifdef CUBERACER_M4
+    static SerialCubeFramework sharedReceiver;
+    static NullStream nullLog;
+    serialIO=&sharedReceiver;BackpackOrLogStrm=&nullLog;
+    return;
+#endif
     bool sbusSerialOutput = false;
 	bool sumdSerialOutput = false;
     bool mavlinkSerialOutput = false;
@@ -1554,6 +1563,9 @@ void reconfigureSerial1()
 
 static void serialShutdown()
 {
+#ifdef CUBERACER_M4
+    return; // Static shared-memory backend has no UART to shut down.
+#endif
     BackpackOrLogStrm = new NullStream();
     if(serialIO != nullptr)
     {
@@ -1929,6 +1941,14 @@ static void checkSendLinkStatsToFc(uint32_t now)
         if (connectionState == disconnected)
         {
             getRFlinkInfo();
+#ifdef CUBERACER_M4
+            cfRxStatus_t status{};
+            status.packetRateHz=1000000U/ExpressLRS_currAirRate_Modparams->interval;
+            status.rssiDbm=-(linkStats.active_antenna ? linkStats.uplink_RSSI_2 : linkStats.uplink_RSSI_1);
+            status.snr=linkStats.uplink_SNR;status.linkQuality=linkStats.uplink_Link_quality;
+            status.antenna=linkStats.active_antenna;status.power=POWERMGNT::currPower();
+            elrsCfPublishStats(&status);
+#endif
         }
 
         if ((connectionState != disconnected && connectionHasModelMatch && teamraceHasModelMatch) ||
