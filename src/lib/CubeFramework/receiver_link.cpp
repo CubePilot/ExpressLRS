@@ -2,6 +2,8 @@
 #include "receiver_link.h"
 #include "receiver_config.h"
 #include "receiver_rc.h"
+#include "crsf_connector.h"
+#include "CRSFRouter.h"
 #include <Arduino.h>
 #include <CubePilotFW/ReceiverEndpoint.h>
 #include <CubePilotFW/ReceiverLayout.h>
@@ -16,6 +18,9 @@ static_assert(sizeof(BootRecord)==12);
 volatile BootRecord record __attribute__((section(".noinit.cuberacer_boot")));
 constexpr uint32_t BOOT_MAGIC=0x43525831;
 ReceiverEndpoint endpoint;
+CubeFrameworkCrsfConnector crsfConnector;
+bool crsfRouterReady=false,telemetryReady=false;
+uint32_t telemetrySession=0,telemetryRevision=0;
 ElrsCfConfigClient client;
 ElrsCfRcPublisher rcPublisher;
 cfRxStatus_t radioStatus{};
@@ -52,6 +57,14 @@ void sendAck()
 }
 uint32_t lastHello=0;
 bool active=false;
+}
+void elrsCfStartCrsfRouter()
+{
+    if(!crsfRouterReady) { crsfRouter.addConnector(&crsfConnector);crsfRouterReady=true; }
+}
+bool elrsCfSendCrsf(const uint8_t *frame,uint8_t length)
+{
+    return active && crsfRouterReady && elrsCfConfigReady() && endpoint.queueCrsf(frame,length,micros());
 }
 void elrsCfInit(void)
 {
@@ -166,6 +179,22 @@ void elrsCfPoll(uint32_t nowUs)
         haveRc=rcPublisher.snapshot(rcNow,&rcFrame);
     }
     if (haveRc && !endpoint.sendFrame(rcFrame,nowUs)) { Guard guard;rcPublisher.sent(rcFrame.sequence); }
+    const bool nextTelemetryReady=crsfRouterReady && elrsCfConfigReady();
+    if(crsfRouterReady && (telemetrySession!=client.session() || telemetryRevision!=client.revision() ||
+        (telemetryReady && !nextTelemetryReady))) {
+        Guard guard;elrsCfResetCrsfRouter();
+    }
+    telemetrySession=client.session();telemetryRevision=client.revision();telemetryReady=nextTelemetryReady;
+    // The radio-disabled image does not initialize the radio router. Keep its
+    // mailboxes drained and queues empty until normal startup registers endpoints.
+    if(!crsfRouterReady || !elrsCfConfigReady()) endpoint.clearCrsf();
+    endpoint.pollCrsf(nowUs);
+    cfRxCrsfFrame_t crsf;
+    if(crsfRouterReady && elrsCfConfigReady()) {
+        if(endpoint.takeCrsf(&crsf,true,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
+        if(endpoint.takeCrsf(&crsf,false,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
+        endpoint.flushCrsf(nowUs);
+    } else endpoint.clearCrsf();
     sendAck();
     CubePilotFW_ReceiverControlEnvelope event;
     if (!ackPending && endpoint.takeControlEvent(&event,nowUs)) {
@@ -283,7 +312,7 @@ void elrsCfPoll(uint32_t nowUs)
         envelope.which_payload=CubePilotFW_ReceiverControlEnvelope_status_tag;
         auto &wire=envelope.payload.status;
         wire.session=status.session;wire.revision=status.revision;wire.persistedRevision=status.persistedRevision;
-        wire.rcDrops=status.rcDrops;wire.protocolErrors=endpoint.errors();wire.packetRateHz=status.packetRateHz;
+        wire.rcDrops=status.rcDrops;wire.telemetryDrops=endpoint.telemetryDrops();wire.protocolErrors=endpoint.errors();wire.packetRateHz=status.packetRateHz;
         wire.rssiDbm=status.rssiDbm;wire.snr=status.snr;wire.linkQuality=status.linkQuality;
         wire.antenna=status.antenna;wire.power=status.power;wire.state=status.state;
         if (!endpoint.sendControl(envelope)) lastStatus=nowUs;

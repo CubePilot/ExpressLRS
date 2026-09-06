@@ -28,3 +28,9 @@ cfRxResult_e elrsCfMutationAuthorization(void);
 
 void elrsCfPublishChannels(bool available,bool modelMatch,bool inhibited,const uint32_t *channels);
 void elrsCfPublishStats(const cfRxStatus_t *status);
+
+// Framed management/telemetry calls are main-loop only.
+bool elrsCfSendCrsf(const uint8_t *frame,uint8_t length);
+void elrsCfStartCrsfRouter();
+
+void elrsCfResetCrsfRouter();

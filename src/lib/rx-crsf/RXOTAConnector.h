@@ -19,6 +19,7 @@ enum CustomTelemSubTypeID : uint8_t {
 class RXOTAConnector : public CRSFConnector {
 public:
     RXOTAConnector();
+    void Reset();
     void forwardMessage(const crsf_header_t *message) override;
 
     bool GetNextPayload(uint8_t* nextPayloadSize, uint8_t *payloadData);

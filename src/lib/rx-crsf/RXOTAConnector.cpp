@@ -1,14 +1,13 @@
 #include "RXOTAConnector.h"
 
-#include "helpers.h"
 
 #include <functional>
 #include <unordered_map>
 
 // Size byte in FIFO contains bit to indicate if the frame is deleted
-#define IS_DEL(size) (size & bit(7))
-#define SET_DEL(size) (size | bit(7))
-#define SIZE(size) (size & ~bit(7))
+#define IS_DEL(size) (size & 0x80U)
+#define SET_DEL(size) (size | 0x80U)
+#define SIZE(size) (size & ~0x80U)
 
 enum action_e
 {
@@ -69,6 +68,15 @@ RXOTAConnector::RXOTAConnector()
 {
     addDevice(CRSF_ADDRESS_RADIO_TRANSMITTER);
     addDevice(CRSF_ADDRESS_CRSF_TRANSMITTER);
+}
+
+void RXOTAConnector::Reset()
+{
+#if defined(PLATFORM_ESP32) && SOC_CPU_CORES_NUM > 1
+    std::lock_guard<std::mutex> lock(mutex);
+#endif
+    messagePayloads.flush();
+    prioritizedCount = 0;
 }
 
 bool RXOTAConnector::GetNextPayload(uint8_t *nextPayloadSize, uint8_t *payloadData)

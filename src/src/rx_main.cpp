@@ -2101,8 +2101,10 @@ void resetConfigAndReboot()
 
 void setup()
 {
-#if defined(CUBERACER_M4_RADIO_DISABLED)
+#ifdef CUBERACER_M4
     elrsCfInit();
+#endif
+#if defined(CUBERACER_M4_RADIO_DISABLED)
     return; // Checkpoint A: no EEPROM, GPIO, UART or radio initialization.
 #endif
 #ifdef DBG_PIN_PORT
@@ -2176,6 +2178,9 @@ void setup()
         }
         crsfRouter.addEndpoint(&crsfReceiver);
         crsfRouter.addConnector(&otaConnector);
+#ifdef CUBERACER_M4
+        elrsCfStartCrsfRouter();
+#endif
         setupSerial();
         setupSerial1();
 
@@ -2422,5 +2427,27 @@ cfRxResult_e elrsCfRuntimeCommand(cfRxCommand_e command)
 #endif
     default: return CF_RX_INVALID;
     }
+}
+#endif
+
+#ifdef CUBERACER_M4
+void elrsCfResetCrsfRouter()
+{
+    // Caller masks local interrupts while resetting ISR-shared assemblers.
+#ifndef CUBERACER_M4_RADIO_DISABLED
+    otaConnector.Reset();
+    DataDlSender.ResetState();
+    DataUlReceiver.ResetState();
+#endif
+}
+bool elrsCfForwardToFcAllowed()
+{
+    // Preserve SerialCRSF's team-race forwarding policy.
+    return elrsCfConfigReady() && teamraceHasModelMatch;
+}
+void elrsCfTelemetrySensor(uint8_t type)
+{
+    if(type==CRSF_FRAMETYPE_BATTERY_SENSOR) crsfBatterySensorDetected=true;
+    if(type==CRSF_FRAMETYPE_BARO_ALTITUDE || type==CRSF_FRAMETYPE_VARIO) crsfBaroSensorDetected=true;
 }
 #endif

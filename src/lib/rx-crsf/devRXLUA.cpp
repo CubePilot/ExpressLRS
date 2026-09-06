@@ -1,3 +1,4 @@
+#if !defined(UNIT_TEST)
 #include "RXEndpoint.h"
 #include "device.h"
 
@@ -23,3 +24,5 @@ device_t RXLUA_device = {
   .timeout = nullptr,
   .subscribe = EVENT_ALL
 };
+
+#endif
