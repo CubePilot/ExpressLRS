@@ -7,5 +7,5 @@ def skip_framework_startup(env, node):
 env.AddBuildMiddleware(skip_framework_startup, "*/startup_stm32yyxx.S")
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.elf", env.VerboseAction(
-    "$OBJCOPY -O ihex $SOURCE $BUILD_DIR/${PROGNAME}.hex",
+    "$OBJCOPY -O ihex $TARGET $BUILD_DIR/${PROGNAME}.hex",
     "Generating CubeRacer M4 HEX"))
