@@ -51,6 +51,11 @@ void test_original_units_and_invalid_channel_bounds() {
     channels[0]=2048;TEST_ASSERT_FALSE(publisher.publish(true,true,false,channels,101));
     TEST_ASSERT_FALSE(publisher.snapshot(101,&frame));
 }
+void test_interrupt_after_poll_timestamp_does_not_expire_new_frame() {
+    cfRxFrame_t frame{};publisher.publish(true,true,false,channels,101);
+    TEST_ASSERT_FALSE(publisher.snapshot(100,&frame));
+    TEST_ASSERT_TRUE(publisher.snapshot(102,&frame));TEST_ASSERT_EQUAL(1,frame.sequence);
+}
 int main() { UNITY_BEGIN();RUN_TEST(test_only_eligible_frames_advance_sequence);
     RUN_TEST(test_latest_snapshot_survives_completion_of_older_copy);RUN_TEST(test_inhibition_and_session_change_discard_old_frames);
-    RUN_TEST(test_stale_snapshot_and_time_wrap);RUN_TEST(test_original_units_and_invalid_channel_bounds);return UNITY_END(); }
+    RUN_TEST(test_interrupt_after_poll_timestamp_does_not_expire_new_frame);RUN_TEST(test_stale_snapshot_and_time_wrap);RUN_TEST(test_original_units_and_invalid_channel_bounds);return UNITY_END(); }

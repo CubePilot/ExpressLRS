@@ -161,8 +161,9 @@ void elrsCfPoll(uint32_t nowUs)
     bool haveRc;
     {
         Guard guard;
-        rcPublisher.configure(client.session(),client.revision(),client.ready(nowUs) && !peerRequestPending && !awaitingCommand);
-        haveRc=rcPublisher.snapshot(nowUs,&rcFrame);
+        const uint32_t rcNow=micros();
+        rcPublisher.configure(client.session(),client.revision(),client.ready(rcNow) && !peerRequestPending && !awaitingCommand);
+        haveRc=rcPublisher.snapshot(rcNow,&rcFrame);
     }
     if (haveRc && !endpoint.sendFrame(rcFrame,nowUs)) { Guard guard;rcPublisher.sent(rcFrame.sequence); }
     sendAck();

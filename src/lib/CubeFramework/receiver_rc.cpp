@@ -20,7 +20,11 @@ bool ElrsCfRcPublisher::publish(bool available,bool modelMatch,bool inhibited,co
 bool ElrsCfRcPublisher::snapshot(uint32_t nowUs,cfRxFrame_t *out)
 {
     if (!pending_ || !out) return false;
-    if (uint32_t(nowUs-stagedUs_)>=MAX_AGE_US) { pending_=false;++drops_;return false; }
+    const uint32_t age=nowUs-stagedUs_;
+    // An ISR may publish after a caller sampled its poll timestamp. Defer
+    // that frame rather than interpreting a negative age as a long stall.
+    if (age>=0x80000000U) return false;
+    if (age>=MAX_AGE_US) { pending_=false;++drops_;return false; }
     *out=frame_;return true;
 }
 void ElrsCfRcPublisher::sent(uint32_t sequence)
