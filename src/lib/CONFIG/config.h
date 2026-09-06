@@ -1,4 +1,7 @@
 #pragma once
+#ifdef CUBERACER_M4
+#include <CubePilotFW/ReceiverTypes.h>
+#endif
 
 #include "targets.h"
 #include "elrs_eeprom.h"
@@ -260,6 +263,9 @@ class RxConfig
 {
 public:
     RxConfig();
+#ifdef CUBERACER_M4
+    void ApplyCubeSettings(const cfRxSettings_t *settings);
+#endif
 
     void Load();
     uint32_t Commit();

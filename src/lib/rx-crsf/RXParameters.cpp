@@ -7,6 +7,9 @@
 #include "devServoOutput.h"
 #include "helpers.h"
 #include "logging.h"
+#ifdef CUBERACER_M4
+#include "receiver_link.h"
+#endif
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
 
@@ -18,7 +21,9 @@ extern bool BindingModeRequest;
 
 extern RXEndpoint crsfReceiver;
 
-#if defined(Regulatory_Domain_EU_CE_2400)
+#if defined(CUBERACER_M4)
+char strPowerLevels[] = "10;MatchTX";
+#elif defined(Regulatory_Domain_EU_CE_2400)
 #if defined(RADIO_LR1121)
 char strPowerLevels[] = "10/10;25/25;25/50;25/100;25/250;25/500;25/1000;25/2000;MatchTX ";
 #else
@@ -26,6 +31,23 @@ char strPowerLevels[] = "10;25;50;100;250;500;1000;2000;MatchTX ";
 #endif
 #else
 char strPowerLevels[] = "10;25;50;100;250;500;1000;2000;MatchTX ";
+#endif
+#ifdef CUBERACER_M4
+static stringParameter luaConfigStatus = {{"Config Status", CRSF_INFO}, "Waiting"};
+static const char *configStatusText()
+{
+  switch (elrsCfSettingsResult()) {
+    case CF_RX_OK: return "Applied";
+    case CF_RX_PENDING: return "Pending";
+    case CF_RX_ARMED: return "Armed";
+    case CF_RX_BUSY: return "Busy";
+    case CF_RX_SAVE_FAILED: return "Save failed";
+    case CF_RX_TIMEOUT: return "Timed out";
+    case CF_RX_INVALID: return "Invalid";
+    case CF_RX_UNSUPPORTED: return "Unsupported";
+    default: return "Waiting for FC";
+  }
+}
 #endif
 static char modelString[] = "000";
 static char pwmModes[] = "50Hz;60Hz;100Hz;160Hz;333Hz;400Hz;10kHzDuty;On/Off;DShot;DShot 3D;Serial RX;Serial TX;I2C SCL;I2C SDA;Serial2 RX;Serial2 TX";
@@ -480,18 +502,23 @@ void RXEndpoint::luaparamSetFailsafe(propertiesCommon *item, uint8_t arg)
 static void luaparamSetPower(propertiesCommon* item, uint8_t arg)
 {
   UNUSED(item);
+#ifdef CUBERACER_M4
+  const uint8_t newPower = arg ? PWR_MATCH_TX : PWR_10mW;
+#else
   uint8_t newPower = arg + POWERMGNT::getMinPower();
   if (newPower > POWERMGNT::getMaxPower())
   {
     newPower = PWR_MATCH_TX;
   }
 
+#endif
   config.SetPower(newPower);
   // POWERMGNT::setPower() will be called in updatePower() in the main loop
 }
 
 void RXEndpoint::registerParameters()
 {
+#ifndef CUBERACER_M4
   registerParameter(&luaSerialProtocol, [](propertiesCommon* item, uint8_t arg){
     config.SetSerialProtocol((eSerialProtocol)arg);
     if (config.IsModified()) {
@@ -526,6 +553,7 @@ void RXEndpoint::registerParameters()
     config.SetSourceSysId((uint8_t)arg);
   });
 
+#endif
   if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
   {
     registerParameter(&luaAntennaMode, [](propertiesCommon* item, uint8_t arg){
@@ -533,6 +561,10 @@ void RXEndpoint::registerParameters()
     });
   }
 
+#ifdef CUBERACER_M4
+  registerParameter(&luaTlmPower, &luaparamSetPower);
+  registerParameter(&luaConfigStatus);
+#else
   if (POWERMGNT::getMinPower() != POWERMGNT::getMaxPower())
   {
     filterOptions(&luaTlmPower, POWERMGNT::getMinPower(), POWERMGNT::getMaxPower(), strPowerLevels);
@@ -540,6 +572,7 @@ void RXEndpoint::registerParameters()
     registerParameter(&luaTlmPower, &luaparamSetPower);
   }
 
+#endif
   // Teamrace
   registerParameter(&luaTeamraceFolder);
   registerParameter(&luaTeamraceChannel, [](propertiesCommon* item, uint8_t arg) {
@@ -549,6 +582,7 @@ void RXEndpoint::registerParameters()
     config.SetTeamracePosition(arg);
   }, luaTeamraceFolder.common.id);
 
+#ifndef CUBERACER_M4
   if (OPT_HAS_SERVO_OUTPUT)
   {
     luaparamMappingChannelOut(&luaMappingOutputMode.common, luaMappingChannelOut.properties.u.value);
@@ -564,15 +598,26 @@ void RXEndpoint::registerParameters()
     });
   }
 
+#endif
   registerParameter(&luaBindStorage, [](propertiesCommon* item, uint8_t arg) {
     config.SetBindStorage((rx_config_bindstorage_t)arg);
   });
   registerParameter(&luaBindMode, [this](propertiesCommon* item, uint8_t arg){
+#ifdef CUBERACER_M4
+    if (arg == lcsClick || arg == lcsConfirmed) {
+      elrsCfRequestCommand(config.IsOnLoan() ? CF_RX_RETURN_LOAN : CF_RX_BIND);
+    } else if (arg == lcsCancel) {
+      elrsCfRequestCommand(CF_RX_CANCEL_BIND);
+    }
+    const bool pending = elrsCfSettingsResult() == CF_RX_PENDING;
+    sendCommandResponse(&luaBindMode, pending ? lcsExecuting : lcsIdle, configStatusText());
+#else
     // Complete when TX polls for status i.e. going back to idle, because we're going to lose connection
     if (arg == lcsQuery) {
       deferExecutionMillis(200, EnterBindingModeSafely);
     }
     sendCommandResponse(&luaBindMode, arg < 5 ? lcsExecuting : lcsIdle, arg < 5 ? "Entering..." : "");
+#endif
   });
 
   registerParameter(&luaModelNumber);
@@ -589,6 +634,9 @@ static void updateBindModeLabel()
 
 void RXEndpoint::updateParameters()
 {
+#ifdef CUBERACER_M4
+  setStringValue(&luaConfigStatus, configStatusText());
+#else
   setTextSelectionValue(&luaSerialProtocol, config.GetSerialProtocol());
 #if defined(PLATFORM_ESP32)
   if (RX_HAS_SERIAL1)
@@ -598,12 +646,16 @@ void RXEndpoint::updateParameters()
 #endif
 
   setTextSelectionValue(&luaSBUSFailsafeMode, config.GetFailsafeMode());
+#endif
 
   if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
   {
     setTextSelectionValue(&luaAntennaMode, config.GetAntennaMode());
   }
 
+#ifdef CUBERACER_M4
+  setTextSelectionValue(&luaTlmPower, config.GetPower() == PWR_MATCH_TX ? 1 : 0);
+#else
   if (MinPower != MaxPower)
   {
     // The last item (for MatchTX) will be MaxPower - MinPower + 1
@@ -611,10 +663,12 @@ void RXEndpoint::updateParameters()
     setTextSelectionValue(&luaTlmPower, luaPwrVal - POWERMGNT::getMinPower());
   }
 
+#endif
   // Teamrace
   setTextSelectionValue(&luaTeamraceChannel, config.GetTeamraceChannel() - AUX2);
   setTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
 
+#ifndef CUBERACER_M4
   if (OPT_HAS_SERVO_OUTPUT)
   {
     const rx_config_pwm_t *pwmCh = config.GetPwmChannel(luaMappingChannelOut.properties.u.value - 1);
@@ -623,6 +677,7 @@ void RXEndpoint::updateParameters()
     setTextSelectionValue(&luaMappingInverted, pwmCh->val.inverted);
   }
 
+#endif
   if (config.GetModelId() == 255)
   {
     setStringValue(&luaModelNumber, "Off");
@@ -635,6 +690,7 @@ void RXEndpoint::updateParameters()
   setTextSelectionValue(&luaBindStorage, config.GetBindStorage());
   updateBindModeLabel();
 
+#ifndef CUBERACER_M4
   if (config.GetSerialProtocol() == PROTOCOL_MAVLINK)
   {
     setUint8Value(&luaSourceSysId, config.GetSourceSysId() == 0 ? 255 : config.GetSourceSysId());  //display Source sysID if 0 display 255 to mimic logic in SerialMavlink.cpp
@@ -647,5 +703,6 @@ void RXEndpoint::updateParameters()
     LUA_FIELD_HIDE(luaSourceSysId)
     LUA_FIELD_HIDE(luaTargetSysId)
   }
+#endif
 }
 #endif

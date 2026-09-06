@@ -936,6 +936,12 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
 
 void ICACHE_RAM_ATTR OnELRSBindMSP(uint8_t* newUid4)
 {
+#ifdef CUBERACER_M4
+    uint8_t candidate[6]={0,0,newUid4[0],newUid4[1],newUid4[2],newUid4[3]};
+    elrsCfBindUid(candidate);
+    return;
+#endif
+
     // Binding over MSP only contains 4 bytes due to packet size limitations, clear out any leading bytes
     UID[0] = 0;
     UID[1] = 0;
@@ -1048,6 +1054,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
     DBGW('s');
 #endif
 
+#ifndef CUBERACER_M4
     if (otaSync->otaProtocol == TX_MAVLINK_MODE)
     {
         config.SetSerialProtocol(PROTOCOL_MAVLINK);
@@ -1070,6 +1077,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
         config.SetAntennaMode(otaSync->geminiMode);
     }
 
+#endif
     // Will change the packet air rate in loop() if this changes
     ExpressLRS_nextAirRateIndex = enumRatetoIndex((expresslrs_RFrates_e)otaSync->rfRateEnum);
     updateSwitchModePendingFromOta(otaSync->switchEncMode);
@@ -1563,6 +1571,9 @@ void reconfigureSerial()
 
 static void setupConfigAndPocCheck()
 {
+#ifdef CUBERACER_M4
+    return; // No EEPROM initialization or boot-count binding on the passenger core.
+#endif
     eeprom.Begin();
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load();
@@ -1703,7 +1714,7 @@ static void cycleRfMode(unsigned long now)
     } // if time to switch RF mode
 }
 
-static void EnterBindingMode()
+static void EnterBindingMode(bool administered = false)
 {
     if (InBindingMode)
     {
@@ -1711,6 +1722,10 @@ static void EnterBindingMode()
         return;
     }
 
+#ifdef CUBERACER_M4
+    if (elrsCfBeginBinding(administered)!=CF_RX_OK) return;
+#else
+    (void)administered;
     // never enter binding mode if binding is supposed to only be administered through the web UI
     if (config.GetBindStorage() == BINDSTORAGE_ADMINISTERED) {
         return;
@@ -1720,6 +1735,8 @@ static void EnterBindingMode()
     // Model can be reloaned immediately by binding now
     config.ReturnLoan();
     config.Commit();
+
+#endif
 
     // Binding uses 50Hz, and InvertIQ
     OtaCrcInitializer = OTA_VERSION_ID;
@@ -1803,6 +1820,7 @@ static void updateBindingMode(unsigned long now)
     }
 #endif
 
+#ifndef CUBERACER_M4
     // If the power on counter is >=3, enter binding, the counter will be reset after 2s
     else if (!InBindingMode && config.GetPowerOnCounter() >= 3)
     {
@@ -1814,17 +1832,30 @@ static void updateBindingMode(unsigned long now)
         EnterBindingMode();
     }
 
+#endif
+
     // If the eeprom is indicating that we're not bound, enter binding
     else if (!UID_IS_BOUND(UID) && !InBindingMode)
     {
         DBGLN("RX has not been bound, enter binding mode");
+#ifdef CUBERACER_M4
+        static uint32_t lastAutoBind=0;
+        const uint32_t now=millis();
+        if (uint32_t(now-lastAutoBind)>=1000U && !elrsCfOperationPending()) {
+            lastAutoBind=now;elrsCfRequestCommand(CF_RX_BIND);
+        }
+#else
         EnterBindingMode();
+#endif
     }
 
     else if (BindingModeRequest)
     {
         DBGLN("Connected request to enter binding mode");
         BindingModeRequest = false;
+#ifdef CUBERACER_M4
+        elrsCfRequestCommand(config.IsOnLoan() ? CF_RX_RETURN_LOAN : CF_RX_BIND);
+#else
         if (connectionState == connected)
         {
             LostConnection(false);
@@ -1847,11 +1878,16 @@ static void updateBindingMode(unsigned long now)
             config.Commit();
         }
         EnterBindingMode();
+#endif
     }
 }
 
 void EnterBindingModeSafely()
 {
+#ifdef CUBERACER_M4
+    elrsCfRequestCommand(config.IsOnLoan() ? CF_RX_RETURN_LOAN : CF_RX_BIND);
+    return;
+#endif
     // Will not enter Binding mode if in the process of a passthrough update
     // or currently binding
     if (connectionState == serialUpdate || InBindingMode)
@@ -2020,6 +2056,10 @@ RF_PRE_INIT()
 
 void resetConfigAndReboot()
 {
+#ifdef CUBERACER_M4
+    elrsCfResetSettings();
+    return;
+#endif
     config.SetDefaults(true);
     // Prevent WDT from rebooting too early if
     // all this flash write is taking too long
@@ -2196,6 +2236,7 @@ void loop()
     // read and process any data from serial ports, send any queued non-RC data
     handleSerialIO();
 
+#ifndef CUBERACER_M4
     // If the reboot time is set and the current time is past the reboot time then reboot.
     if (rebootTime != 0 && now > rebootTime) {
 #if defined(PLATFORM_STM32)
@@ -2205,6 +2246,7 @@ void loop()
 #endif
     }
 
+#endif
     CheckConfigChangePending();
     executeDeferredFunction(micros());
 
@@ -2299,6 +2341,9 @@ struct bootloader {
 
 void reset_into_bootloader(void)
 {
+#ifdef CUBERACER_M4
+    return; // Whole-chip DFU and USB belong to M7.
+#else
     SERIAL_PROTOCOL_TX.println((const char *)&target_name[4]);
     SERIAL_PROTOCOL_TX.flush();
 #if defined(PLATFORM_ESP8266)
@@ -2317,4 +2362,45 @@ void reset_into_bootloader(void)
     NVIC_SystemReset();
 #endif
 #endif
+#endif
 }
+
+#ifdef CUBERACER_M4
+void elrsCfApplyRuntime(const cfRxSettings_t *settings)
+{
+    config.ApplyCubeSettings(settings);
+    firmwareOptions.lock_on_first_connection=settings->lockOnFirstConnection;
+    memcpy(UID,settings->boundUid,UID_LEN);
+    // Radio reconfiguration consumes the verified change event in the main loop.
+    // No radio or shared GPIO register is touched by configuration application.
+}
+#endif
+
+#ifdef CUBERACER_M4
+cfRxResult_e elrsCfRuntimeCommand(cfRxCommand_e command)
+{
+    const auto auth=elrsCfMutationAuthorization();
+    if (auth!=CF_RX_OK) return auth;
+    switch (command) {
+    case CF_RX_RESET_SETTINGS: return elrsCfResetSettings();
+    case CF_RX_RETURN_LOAN: return elrsCfReturnLoan();
+    case CF_RX_BIND:
+    case CF_RX_CANCEL_BIND:
+#ifdef CUBERACER_M4_RADIO_DISABLED
+        return CF_RX_UNSUPPORTED;
+#else
+        if (command==CF_RX_BIND) {
+            if (connectionState==connected) LostConnection(false);
+            EnterBindingMode(true);
+            return elrsCfSettingsResult();
+        }
+        {
+            const auto result=elrsCfCancelBinding();
+            if (result==CF_RX_OK && InBindingMode) ExitBindingMode();
+            return result;
+        }
+#endif
+    default: return CF_RX_INVALID;
+    }
+}
+#endif
