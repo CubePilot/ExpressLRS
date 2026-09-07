@@ -1,3 +1,4 @@
+#pragma once
 #include "targets.h"
 #include <SPI.h>
 
@@ -47,7 +48,19 @@ public:
      */
     void inline ICACHE_RAM_ATTR write(uint8_t cs_mask, uint8_t * data, uint32_t size) { _transfer(cs_mask, data, size, false); }
 
+#if defined(PLATFORM_STM32)
+    // Report the Arduino transport result instead of discarding it in SPIClass.
+    spi_status_e transferChecked(uint8_t *data, uint32_t size);
+#endif
+
+#ifdef CUBERACER_M4
+    spi_status_e getLastError() const { return spiFault; }
+#endif
+
 private:
+#ifdef CUBERACER_M4
+    volatile spi_status_e spiFault = SPI_OK; // Latched until MCU reset.
+#endif
     void _transfer(uint8_t cs_mask, uint8_t *data, uint32_t size, bool reading);
 };
 

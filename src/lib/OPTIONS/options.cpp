@@ -1,5 +1,8 @@
 #include "targets.h"
 #include "options.h"
+#ifdef CUBERACER_M4
+#include "board_profile.h"
+#endif
 
 #include "logging.h"
 
@@ -269,6 +272,13 @@ static bool options_LoadProductAndDeviceName(EspFlashStream &strmFlash)
 
 bool options_init()
 {
+#ifdef CUBERACER_M4
+    CubeRacer::bootOptions(firmwareOptions);
+    strcpy(product_name, "CubeRacer SX1281");
+    strcpy(device_name, "CubeRacer M4");
+    logo_image = 0;
+    return true;
+#else
     debugCreateInitLogger();
 
 #if defined(PLATFORM_ESP32)
@@ -323,5 +333,6 @@ bool options_init()
     debugFreeInitLogger();
 
     return hasHardware;
+#endif
 }
 #endif

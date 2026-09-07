@@ -1,4 +1,7 @@
 #pragma once
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#endif
 
 class Button
 {
@@ -39,21 +42,45 @@ public:
     void init(uint8_t pin, bool idlelow = false)
     {
         _pin = pin;
-        _idlelow = idlelow,
+        _idlelow = idlelow;
+#ifndef CUBERACER_M4
         pinMode(_pin, _idlelow ? INPUT : INPUT_PULLUP);
+#endif
     }
+
+#ifdef CUBERACER_M4
+    void reset()
+    {
+        _state = STATE_IDLE;
+        _isLongPress = false;
+        _pressCount = _longCount = 0;
+        _lastFallingEdge = millis();
+    }
+#endif
 
     // Call this in loop()
     int update()
     {
         const uint32_t now = millis();
+#ifdef CUBERACER_M4
+        bool high;
+        if (!cuberacerRadioButtonRead(_pin, high))
+        {
+            // A revoked/faulted grant must not synthesize a release or retain
+            // a partial press into the next session.
+            reset();
+            return MS_DEBOUNCE;
+        }
+#else
+        const bool high = digitalRead(_pin);
+#endif
 
         // Reset press count if it has been too long since last rising edge
         if (now - _lastFallingEdge > MS_MULTI_TIMEOUT)
             _pressCount = 0;
 
         _state = (_state << 1) & 0b110;
-        _state |= digitalRead(_pin) ^ _idlelow;
+        _state |= high ^ _idlelow;
 
         // If rising edge (release)
         if (_state == STATE_RISE)

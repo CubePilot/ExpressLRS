@@ -16,9 +16,12 @@ Maintainer: Miguel Luis, Gregory Cristian and Matthieu Verdy
 Modified and adapted by Alessandro Carcione for ELRS project
 */
 
-#ifndef UNIT_TEST
+#if !defined(UNIT_TEST) || defined(CUBERACER_RADIO_HAL_TEST)
 #include "SX1280_Regs.h"
 #include "SX1280_hal.h"
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#endif
 #include <SPIEx.h>
 #include "logging.h"
 
@@ -31,18 +34,25 @@ SX1280Hal::SX1280Hal()
 
 void SX1280Hal::end()
 {
+#ifdef CUBERACER_M4
+    cuberacerRadioEnd();
+#else
     detachInterrupt(GPIO_PIN_DIO1);
     if (GPIO_PIN_DIO1_2 != UNDEF_PIN)
     {
         detachInterrupt(GPIO_PIN_DIO1_2);
     }
     SPIEx.end();
+#endif
     IsrCallback_1 = nullptr; // remove callbacks
     IsrCallback_2 = nullptr; // remove callbacks
 }
 
 void SX1280Hal::init()
 {
+#ifdef CUBERACER_M4
+    cuberacerRadioInit(this->dioISR_1);
+#else
     DBGLN("Hal Init");
 
     if (GPIO_PIN_BUSY != UNDEF_PIN)
@@ -60,6 +70,10 @@ void SX1280Hal::init()
         pinMode(GPIO_PIN_DIO1_2, INPUT);
     }
 
+    if (GPIO_PIN_RST != UNDEF_PIN)
+        pinMode(GPIO_PIN_RST, OUTPUT);
+    if (GPIO_PIN_RST_2 != UNDEF_PIN)
+        pinMode(GPIO_PIN_RST_2, OUTPUT);
     pinMode(GPIO_PIN_NSS, OUTPUT);
     digitalWrite(GPIO_PIN_NSS, HIGH);
 
@@ -96,6 +110,7 @@ void SX1280Hal::init()
     {
         attachInterrupt(digitalPinToInterrupt(GPIO_PIN_DIO1_2), this->dioISR_2, RISING);
     }
+#endif
 }
 
 void SX1280Hal::reset(void)
@@ -104,11 +119,9 @@ void SX1280Hal::reset(void)
 
     if (GPIO_PIN_RST != UNDEF_PIN)
     {
-        pinMode(GPIO_PIN_RST, OUTPUT);
         digitalWrite(GPIO_PIN_RST, LOW);
         if (GPIO_PIN_RST_2 != UNDEF_PIN)
         {
-            pinMode(GPIO_PIN_RST_2, OUTPUT);
             digitalWrite(GPIO_PIN_RST_2, LOW);
         }
         delay(50);

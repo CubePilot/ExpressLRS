@@ -82,9 +82,13 @@ void ICACHE_RAM_ATTR SPIExClass::_transfer(uint8_t cs_mask, uint8_t *data, uint3
         }
     }
 #elif defined(PLATFORM_STM32)
-    digitalWrite(GPIO_PIN_NSS, LOW);
-    SPIEx.transfer(data, size);
-    digitalWrite(GPIO_PIN_NSS, HIGH);
+    const auto status = transferChecked(data, size);
+#ifdef CUBERACER_M4
+    if (status != SPI_OK && reading)
+        memset(data, 0, size);
+#else
+    (void)status;
+#endif
 #endif
 }
 
@@ -94,4 +98,35 @@ SPIExClass SPIEx(FSPI);
 SPIExClass SPIEx(VSPI);
 #else
 SPIExClass SPIEx;
+#endif
+
+#if defined(PLATFORM_STM32)
+spi_status_e SPIExClass::transferChecked(uint8_t *data, uint32_t size)
+{
+    if (!data || !size || size > UINT16_MAX)
+        return SPI_ERROR;
+#ifdef CUBERACER_M4
+    const uint32_t previous = __get_PRIMASK();
+    __disable_irq();
+    if (spiFault != SPI_OK || getHandle()->State != HAL_SPI_STATE_READY)
+    {
+        if (spiFault == SPI_OK)
+            spiFault = SPI_ERROR;
+        __set_PRIMASK(previous);
+        return spiFault;
+    }
+#endif
+    digitalWrite(GPIO_PIN_NSS, LOW);
+#ifdef CUBERACER_M4
+    delayMicroseconds(1); // NSS setup and BUSY assertion delay.
+#endif
+    const spi_status_e status = spi_transfer(&_spi, data, data, size);
+    digitalWrite(GPIO_PIN_NSS, HIGH);
+#ifdef CUBERACER_M4
+    delayMicroseconds(1); // Minimum NSS-high interval.
+    spiFault = status;
+    __set_PRIMASK(previous);
+#endif
+    return status;
+}
 #endif

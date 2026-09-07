@@ -8,6 +8,13 @@
 
 static Button button1;
 static Button button2;
+#ifdef CUBERACER_M4
+void buttonResetPendingPresses()
+{
+    button1.reset();
+    button2.reset();
+}
+#endif
 
 // only check every second if the device is in-use, i.e. RX connected, or TX is armed
 static constexpr int MS_IN_USE = 1000;

@@ -1,0 +1,4 @@
+{
+  "name": "CubeRacerRadio",
+  "build": { "srcDir": ".", "srcFilter": "+<*.cpp> -<tests/>" }
+}

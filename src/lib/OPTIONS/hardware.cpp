@@ -1,4 +1,4 @@
-#if !defined(UNIT_TEST)
+#if !defined(UNIT_TEST) && !defined(CUBERACER_M4)
 #include "options.h"
 #include "helpers.h"
 #include "logging.h"
