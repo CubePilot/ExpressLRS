@@ -23,6 +23,7 @@ void SystemCoreClockUpdate(void);
 #define TICK_INT_PRIORITY 15
 int HAL_InitTick(unsigned priority);
 ''')
+            (d / 'dwt.h').write_text('unsigned dwt_init(void);\n')
             (d / 'test.c').write_text('''
 #include <assert.h>
 #include "stm32h7xx.h"
@@ -33,6 +34,7 @@ void SystemCoreClockUpdate(void) { assert(phase == 0); phase = 1; }
 int HAL_InitTick(unsigned priority) {
     assert(phase == 1); assert(priority == 15); phase = 2; return 0;
 }
+unsigned dwt_init(void) { assert(phase == 2); phase = 3; return 0; }
 void __wrap_SystemInit(void);
 void __wrap_ExitRun0Mode(void);
 void init(void);
@@ -42,7 +44,7 @@ int main(void) {
     __wrap_SystemInit();
     assert(core.CPACR == (1 | (15u << 20)));
     assert(core.VTOR == 0x08180000 && barriers == 2 && phase == 0);
-    init(); assert(phase == 2);
+    init(); assert(phase == 3);
 }
 ''')
             subprocess.run(['cc', '-std=c11', '-Wall', '-Werror', '-DCORE_CM4',

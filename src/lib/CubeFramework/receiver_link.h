@@ -34,3 +34,11 @@ bool elrsCfSendCrsf(const uint8_t *frame,uint8_t length);
 void elrsCfStartCrsfRouter();
 
 void elrsCfResetCrsfRouter();
+
+// Radio lifecycle hooks run in the main loop outside transport critical sections.
+uint8_t elrsCfRadioStart(uint32_t session);
+uint8_t elrsCfRadioReconfigure();
+uint8_t elrsCfRadioFault();
+bool elrsCfRadioStop();
+bool elrsCfRadioReady();
+bool elrsCfRadioRunning();

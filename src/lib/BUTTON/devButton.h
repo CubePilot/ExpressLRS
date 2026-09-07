@@ -19,3 +19,7 @@ typedef struct action {
 
 void registerButtonFunction(action_e action, ButtonAction_fn function);
 size_t button_GetActionCnt();
+
+#ifdef CUBERACER_M4
+void buttonResetPendingPresses();
+#endif

@@ -2,6 +2,7 @@
 #include "receiver_link.h"
 #include "receiver_config.h"
 #include "receiver_rc.h"
+#include "receiver_radio.h"
 #include "crsf_connector.h"
 #include "CRSFRouter.h"
 #include <Arduino.h>
@@ -24,6 +25,16 @@ uint32_t telemetrySession=0,telemetryRevision=0;
 ElrsCfConfigClient client;
 ElrsCfRcPublisher rcPublisher;
 cfRxStatus_t radioStatus{};
+struct RadioRuntime {
+    uint8_t start(uint32_t session) { return elrsCfRadioStart(session); }
+    uint8_t reconfigure() { return elrsCfRadioReconfigure(); }
+    uint8_t fault() const { return elrsCfRadioFault(); }
+    bool stop() { return elrsCfRadioStop(); }
+} radioRuntime;
+ElrsCfRadio<RadioRuntime> radio(radioRuntime);
+volatile bool rfReady=false,rfRunning=false;
+uint32_t lastRadio=0;
+
 uint32_t lastStatus=0;
 struct Guard {
     Guard() { cubefw_pal_criticalEnter(); }
@@ -41,6 +52,18 @@ bool peerRequestPending=false,awaitingCommand=false;
 uint32_t peerRequestTransaction=0,peerRequestLastSend=0;
 uint8_t peerRequestSends=0;
 cfRxCommand_e peerRequestCommand=CF_RX_BIND;
+void updateRadio(uint32_t now) {
+    Guard guard;
+#ifdef CUBERACER_M4_RADIO_DISABLED
+    constexpr bool available=false;
+#else
+    constexpr bool available=true;
+#endif
+    radio.update({client.session(),client.revision(),endpoint.session().linked(now),
+        endpoint.session().receiverEnabled(),client.ready(now) && !peerRequestPending && !awaitingCommand,
+        endpoint.session().peerArmed(),available});
+    rfReady=radio.ready();rfRunning=radio.running();
+}
 void acknowledge(uint32_t transaction,uint32_t revision,uint32_t persistedRevision,cfRxResult_e result,bool operationPending=false)
 {
     pendingAck=CubePilotFW_ReceiverAck_init_zero;
@@ -64,7 +87,7 @@ void elrsCfStartCrsfRouter()
 }
 bool elrsCfSendCrsf(const uint8_t *frame,uint8_t length)
 {
-    return active && crsfRouterReady && elrsCfConfigReady() && endpoint.queueCrsf(frame,length,micros());
+    return active && crsfRouterReady && elrsCfRadioReady() && endpoint.queueCrsf(frame,length,micros());
 }
 void elrsCfInit(void)
 {
@@ -132,6 +155,11 @@ cfRxResult_e elrsCfRequestCommand(cfRxCommand_e command)
 }
 bool elrsCfCanChangeSettings(void) { Guard guard;return client.canChange(micros())==CF_RX_OK; }
 bool elrsCfConfigReady(void) { Guard guard;return client.ready(micros()) && !peerRequestPending && !awaitingCommand; }
+bool elrsCfRadioReady() { Guard guard;return rfReady && elrsCfConfigReady() && !elrsCfRadioFault(); }
+bool elrsCfRadioRunning() {
+    Guard guard;
+    return rfRunning && endpoint.session().linked(micros()) && endpoint.session().receiverEnabled() && !elrsCfRadioFault();
+}
 cfRxResult_e elrsCfSettingsResult(void)
 {
     Guard guard;
@@ -144,7 +172,7 @@ void elrsCfPublishChannels(bool available,bool modelMatch,bool inhibited,const u
 {
     Guard guard;
     const uint32_t now=micros();
-    rcPublisher.configure(client.session(),client.revision(),client.ready(now) && !peerRequestPending && !awaitingCommand);
+    rcPublisher.configure(client.session(),client.revision(),elrsCfRadioReady());
     rcPublisher.publish(available,modelMatch,inhibited,channels,now);
 }
 void elrsCfPublishStats(const cfRxStatus_t *status)
@@ -168,37 +196,14 @@ void elrsCfPoll(uint32_t nowUs)
         client.authorize(endpoint.session().receiverEnabled(),endpoint.session().peerArmed(),
             endpoint.session().lastControlUs(),endpoint.session().linked(nowUs));
     }
-    // RC has priority over control and telemetry. The ISR only stages native
-    // data; protobuf and HSEM work are bounded main-loop operations.
-    cfRxFrame_t rcFrame;
-    bool haveRc;
-    {
-        Guard guard;
-        const uint32_t rcNow=micros();
-        rcPublisher.configure(client.session(),client.revision(),client.ready(rcNow) && !peerRequestPending && !awaitingCommand);
-        haveRc=rcPublisher.snapshot(rcNow,&rcFrame);
-    }
-    if (haveRc && !endpoint.sendFrame(rcFrame,nowUs)) { Guard guard;rcPublisher.sent(rcFrame.sequence); }
-    const bool nextTelemetryReady=crsfRouterReady && elrsCfConfigReady();
-    if(crsfRouterReady && (telemetrySession!=client.session() || telemetryRevision!=client.revision() ||
-        (telemetryReady && !nextTelemetryReady))) {
-        Guard guard;elrsCfResetCrsfRouter();
-    }
-    telemetrySession=client.session();telemetryRevision=client.revision();telemetryReady=nextTelemetryReady;
-    // The radio-disabled image does not initialize the radio router. Keep its
-    // mailboxes drained and queues empty until normal startup registers endpoints.
-    if(!crsfRouterReady || !elrsCfConfigReady()) endpoint.clearCrsf();
-    endpoint.pollCrsf(nowUs);
-    cfRxCrsfFrame_t crsf;
-    if(crsfRouterReady && elrsCfConfigReady()) {
-        if(endpoint.takeCrsf(&crsf,true,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
-        if(endpoint.takeCrsf(&crsf,false,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
-        endpoint.flushCrsf(nowUs);
-    } else endpoint.clearCrsf();
+    updateRadio(nowUs);
     sendAck();
     CubePilotFW_ReceiverControlEnvelope event;
     if (!ackPending && endpoint.takeControlEvent(&event,nowUs)) {
-        if (event.which_payload==CubePilotFW_ReceiverControlEnvelope_ack_tag) {
+        if (event.which_payload==CubePilotFW_ReceiverControlEnvelope_radio_tag) {
+            const auto &wire=event.payload.radio;
+            radio.receive({wire.session,wire.revision,wire.grant,wire.phase,wire.fault});
+        } else if (event.which_payload==CubePilotFW_ReceiverControlEnvelope_ack_tag) {
             const auto &ack=event.payload.ack;
             Guard guard;
             if (peerRequestPending && ack.transaction==peerRequestTransaction) {
@@ -289,6 +294,44 @@ void elrsCfPoll(uint32_t nowUs)
     if ((received && !wasLinked) || uint32_t(nowUs-lastHello)>=ReceiverSession::HEARTBEAT_US) {
         if (!endpoint.sendHello(false,false)) lastHello=nowUs;
     }
+    updateRadio(micros());
+    // Peripheral initialization can take time. Recheck heartbeat freshness after
+    // it returns, before publishing READY or any RC/telemetry data.
+    rfReady=false;rfRunning=false;
+    radio.step();
+    nowUs=micros();updateRadio(nowUs);
+    if (!radio.running()) { radio.step();updateRadio(micros()); }
+    cfRxRadioControl_t radioMessage{};
+    if (!ackPending && uint32_t(nowUs-lastRadio)>=ReceiverSession::HEARTBEAT_US && radio.message(&radioMessage)) {
+        if (!endpoint.sendRadio(radioMessage,nowUs)) { lastRadio=nowUs;radio.sent(radioMessage); }
+    }
+    // Apply lifecycle changes before releasing RC, then service telemetry. The
+    // ISR only stages native data; protobuf/HSEM work stays in the main loop.
+    cfRxFrame_t rcFrame;
+    bool haveRc;
+    {
+        Guard guard;
+        const uint32_t rcNow=micros();
+        rcPublisher.configure(client.session(),client.revision(),elrsCfRadioReady());
+        haveRc=rcPublisher.snapshot(rcNow,&rcFrame);
+    }
+    if (haveRc && !endpoint.sendFrame(rcFrame,nowUs)) { Guard guard;rcPublisher.sent(rcFrame.sequence); }
+    const bool nextTelemetryReady=crsfRouterReady && elrsCfRadioReady();
+    if(crsfRouterReady && (telemetrySession!=client.session() || telemetryRevision!=client.revision() ||
+        (telemetryReady && !nextTelemetryReady))) {
+        Guard guard;elrsCfResetCrsfRouter();
+    }
+    telemetrySession=client.session();telemetryRevision=client.revision();telemetryReady=nextTelemetryReady;
+    // The radio-disabled image does not initialize the radio router. Keep its
+    // mailboxes drained and queues empty until normal startup registers endpoints.
+    if(!crsfRouterReady || !elrsCfRadioReady()) endpoint.clearCrsf();
+    endpoint.pollCrsf(nowUs);
+    cfRxCrsfFrame_t crsf;
+    if(crsfRouterReady && elrsCfRadioReady()) {
+        if(endpoint.takeCrsf(&crsf,true,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
+        if(endpoint.takeCrsf(&crsf,false,nowUs)) crsfConnector.receive(crsf.bytes,crsf.length);
+        endpoint.flushCrsf(nowUs);
+    } else endpoint.clearCrsf();
     if (!ackPending && endpoint.session().linked(nowUs) && uint32_t(nowUs-lastCapabilities)>=1000000U) {
         CubePilotFW_ReceiverControlEnvelope envelope=CubePilotFW_ReceiverControlEnvelope_init_zero;
         envelope.which_payload=CubePilotFW_ReceiverControlEnvelope_capabilities_tag;
@@ -306,7 +349,7 @@ void elrsCfPoll(uint32_t nowUs)
         {
             Guard guard;status=radioStatus;status.session=client.session();status.revision=client.revision();
             status.persistedRevision=client.persistedRevision();status.rcDrops=rcPublisher.drops();
-            status.state=client.ready(nowUs) && !peerRequestPending && !awaitingCommand ? 3 : 2;
+            status.state=radio.fault() ? 4 : (elrsCfRadioReady() ? 3 : 2);
         }
         CubePilotFW_ReceiverControlEnvelope envelope=CubePilotFW_ReceiverControlEnvelope_init_zero;
         envelope.which_payload=CubePilotFW_ReceiverControlEnvelope_status_tag;

@@ -1,5 +1,6 @@
 #include "stm32h7xx.h"
 #include "stm32h7xx_hal.h"
+#include "dwt.h"
 
 #if !defined(CORE_CM4) || defined(CORE_CM7)
 #error "CubeRacer receiver must compile for CM4"
@@ -22,4 +23,6 @@ void init(void)
 {
     SystemCoreClockUpdate();
     HAL_InitTick(TICK_INT_PRIORITY);
+    // Arduino delayMicroseconds uses this core's cycle counter.
+    dwt_init();
 }

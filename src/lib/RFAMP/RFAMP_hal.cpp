@@ -1,7 +1,8 @@
-#ifndef UNIT_TEST
+#if !defined(UNIT_TEST) || defined(CUBERACER_RADIO_HAL_TEST)
 
 #include "RFAMP_hal.h"
 #include "logging.h"
+
 
 RFAMP_hal *RFAMP_hal::instance = nullptr;
 

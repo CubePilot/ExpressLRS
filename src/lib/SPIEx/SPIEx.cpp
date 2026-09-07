@@ -1,4 +1,7 @@
 #include "SPIEx.h"
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#endif
 
 #if defined(PLATFORM_ESP32)
 #include <soc/spi_struct.h>
@@ -81,10 +84,11 @@ void ICACHE_RAM_ATTR SPIExClass::_transfer(uint8_t cs_mask, uint8_t *data, uint3
             dataPtr[i] = fifoPtr[i];
         }
     }
+#elif defined(CUBERACER_M4)
+    // Board lifecycle supplies the grant/BUSY check and latches failures.
+    if (!cuberacerRadioTransfer(data, size) && reading) memset(data, 0, size);
 #elif defined(PLATFORM_STM32)
-    digitalWrite(GPIO_PIN_NSS, LOW);
-    SPIEx.transfer(data, size);
-    digitalWrite(GPIO_PIN_NSS, HIGH);
+    transferChecked(data, size);
 #endif
 }
 
@@ -94,4 +98,26 @@ SPIExClass SPIEx(FSPI);
 SPIExClass SPIEx(VSPI);
 #else
 SPIExClass SPIEx;
+#endif
+
+#if defined(PLATFORM_STM32)
+spi_status_e SPIExClass::transferChecked(uint8_t *data, uint32_t size)
+{
+    if (!data || !size || size > UINT16_MAX) return SPI_ERROR;
+#ifdef CUBERACER_M4
+    const uint32_t previous = __get_PRIMASK();
+    __disable_irq();
+#endif
+    digitalWrite(GPIO_PIN_NSS, LOW);
+#ifdef CUBERACER_M4
+    delayMicroseconds(1); // NSS setup and BUSY assertion delay.
+#endif
+    const spi_status_e status = spi_transfer(&_spi, data, data, size);
+    digitalWrite(GPIO_PIN_NSS, HIGH);
+#ifdef CUBERACER_M4
+    delayMicroseconds(1); // Minimum NSS-high interval.
+    __set_PRIMASK(previous);
+#endif
+    return status;
+}
 #endif

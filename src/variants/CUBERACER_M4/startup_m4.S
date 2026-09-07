@@ -163,7 +163,7 @@ g_pfnVectors:
   .word     Default_Handler                  /* EXTI Line1                   */
   .word     Default_Handler                  /* EXTI Line2                   */
   .word     Default_Handler                  /* EXTI Line3                   */
-  .word     EXTI4_IRQHandler                  /* EXTI Line4                   */
+  .word     CUBERACER_DIO1_IRQHandler                  /* EXTI Line4                   */
   .word     Default_Handler           /* DMA1 Stream 0                */
   .word     Default_Handler           /* DMA1 Stream 1                */
   .word     Default_Handler           /* DMA1 Stream 2                */
@@ -370,8 +370,8 @@ g_pfnVectors:
    .weak      EXTI3_IRQHandler
    .thumb_set EXTI3_IRQHandler,Default_Handler
 
-   .weak      EXTI4_IRQHandler
-   .thumb_set EXTI4_IRQHandler,Default_Handler
+   .weak      CUBERACER_DIO1_IRQHandler
+   .thumb_set CUBERACER_DIO1_IRQHandler,Default_Handler
 
    .weak      DMA1_Stream0_IRQHandler
    .thumb_set DMA1_Stream0_IRQHandler,Default_Handler
