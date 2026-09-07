@@ -1,3 +1,7 @@
+#ifdef CUBERACER_M4
+#include "receiver_link.h"
+#include <stddef.h>
+#endif
 #include "config.h"
 #include "config_legacy.h"
 #include "common.h"
@@ -809,6 +813,10 @@ RxConfig::RxConfig()
 
 void RxConfig::Load()
 {
+#ifdef CUBERACER_M4
+    // M7 supplies configuration before coordinated radio startup.
+    return;
+#else
     m_modified = 0;
     m_eeprom->Get(0, m_config);
 
@@ -851,6 +859,7 @@ void RxConfig::Load()
     }
     m_modified = EVENT_CONFIG_MODEL_CHANGED; // anything to force write
     Commit();
+#endif
 }
 
 void RxConfig::CheckUpdateFlashedUid(bool skipDescrimCheck)
@@ -1081,18 +1090,27 @@ void RxConfig::UpgradeUid(uint8_t *onLoanUid, uint8_t *boundUid)
 
 bool RxConfig::GetIsBound() const
 {
+#ifdef CUBERACER_M4
+    return UID_IS_BOUND(m_config.uid);
+#else
     if (m_config.bindStorage == BINDSTORAGE_VOLATILE)
         return false;
     return UID_IS_BOUND(m_config.uid);
+#endif
 }
 
 bool RxConfig::IsOnLoan() const
 {
+#ifdef CUBERACER_M4
+    cfRxSettings_t settings;
+    return elrsCfGetSettings(&settings) && settings.bindStorage==2 && GetIsBound() && memcmp(settings.homeUid,m_config.uid,6)!=0;
+#else
     if (m_config.bindStorage != BINDSTORAGE_RETURNABLE)
         return false;
     if (!firmwareOptions.hasUID)
         return false;
     return GetIsBound() && memcmp(m_config.uid, firmwareOptions.uid, UID_LEN) != 0;
+#endif
 }
 
 #if defined(PLATFORM_ESP8266)
@@ -1120,6 +1138,12 @@ RxConfig::GetPowerOnCounter() const
 uint32_t
 RxConfig::Commit()
 {
+#ifdef CUBERACER_M4
+    // Only ApplyCubeSettings marks changes; no unacknowledged edit is applied.
+    const uint32_t changes=m_modified;
+    m_modified=0;
+    return changes;
+#else
 #if defined(PLATFORM_ESP8266)
     if (erase_power_on_count)
     {
@@ -1140,22 +1164,30 @@ RxConfig::Commit()
     uint32_t changes = m_modified;
     m_modified = 0;
     return changes;
+#endif
 }
 
 // Setters
 void
 RxConfig::SetUID(uint8_t* uid)
 {
+#ifdef CUBERACER_M4
+    elrsCfBindUid(uid);
+#else
     for (uint8_t i = 0; i < UID_LEN; ++i)
     {
         m_config.uid[i] = uid[i];
     }
     m_modified = EVENT_CONFIG_UID_CHANGED;
+#endif
 }
 
 void
 RxConfig::SetPowerOnCounter(uint8_t powerOnCounter)
 {
+#ifdef CUBERACER_M4
+    (void)powerOnCounter;
+#else
 #if defined(PLATFORM_ESP8266)
     realPowerOnCounter = powerOnCounter;
     if (powerOnCounter == 0)
@@ -1175,32 +1207,44 @@ RxConfig::SetPowerOnCounter(uint8_t powerOnCounter)
         m_modified = EVENT_CONFIG_POWER_COUNT_CHANGED;
     }
 #endif
+#endif
 }
 
 void
 RxConfig::SetModelId(uint8_t modelId)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,modelId),modelId);
+#else
     if (m_config.modelId != modelId)
     {
         m_config.modelId = modelId;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void
 RxConfig::SetPower(uint8_t power)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,telemetryPower),power);
+#else
     if (m_config.power != power)
     {
         m_config.power = power;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 
 void
 RxConfig::SetAntennaMode(uint8_t antennaMode)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,antennaMode),antennaMode);
+#else
     //0 and 1 is use for gpio_antenna_select
     // 2 is diversity
     if (m_config.antennaMode != antennaMode)
@@ -1208,11 +1252,16 @@ RxConfig::SetAntennaMode(uint8_t antennaMode)
         m_config.antennaMode = antennaMode;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void
 RxConfig::SetDefaults(bool commit)
 {
+#ifdef CUBERACER_M4
+    (void)commit;
+    elrsCfResetSettings();
+#else
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 
@@ -1268,20 +1317,28 @@ RxConfig::SetDefaults(bool commit)
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
         Commit();
     }
+#endif
 }
 
 void
 RxConfig::SetStorageProvider(ELRS_EEPROM *eeprom)
 {
+#ifdef CUBERACER_M4
+    (void)eeprom;
+#else
     if (eeprom)
     {
         m_eeprom = eeprom;
     }
+#endif
 }
 
 void
 RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, uint8_t stretched)
 {
+#ifdef CUBERACER_M4
+    (void)ch; (void)failsafe; (void)inputCh; (void)inverted; (void)mode; (void)stretched;
+#else
     if (ch > PWM_MAX_CHANNELS)
         return;
 
@@ -1297,11 +1354,15 @@ RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inv
 
     pwm->raw = newConfig.raw;
     m_modified = EVENT_CONFIG_PWM_CHANGE;
+#endif
 }
 
 void
 RxConfig::SetPwmChannelRaw(uint8_t ch, uint32_t raw)
 {
+#ifdef CUBERACER_M4
+    (void)ch; (void)raw;
+#else
     if (ch > PWM_MAX_CHANNELS)
         return;
 
@@ -1311,35 +1372,48 @@ RxConfig::SetPwmChannelRaw(uint8_t ch, uint32_t raw)
 
     pwm->raw = raw;
     m_modified = EVENT_CONFIG_PWM_CHANGE;
+#endif
 }
 
 void
 RxConfig::SetForceTlmOff(bool forceTlmOff)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,forceTelemetryOff),forceTlmOff);
+#else
     if (m_config.forceTlmOff != forceTlmOff)
     {
         m_config.forceTlmOff = forceTlmOff;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void
 RxConfig::SetRateInitialIdx(uint8_t rateInitialIdx)
 {
+#ifdef CUBERACER_M4
+    elrsCfHintInitialRate(rateInitialIdx);
+#else
     if (m_config.rateInitialIdx != rateInitialIdx)
     {
         m_config.rateInitialIdx = rateInitialIdx;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::SetSerialProtocol(eSerialProtocol serialProtocol)
 {
+#ifdef CUBERACER_M4
+    (void)serialProtocol;
+#else
     if (m_config.serialProtocol != serialProtocol)
     {
         m_config.serialProtocol = serialProtocol;
         m_modified = EVENT_CONFIG_SERIAL_CHANGE;
     }
+#endif
 }
 
 #if defined(PLATFORM_ESP32)
@@ -1355,33 +1429,48 @@ void RxConfig::SetSerial1Protocol(eSerial1Protocol serialProtocol)
 
 void RxConfig::SetTeamraceChannel(uint8_t teamraceChannel)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,teamraceChannel),teamraceChannel);
+#else
     if (m_config.teamraceChannel != teamraceChannel)
     {
         m_config.teamraceChannel = teamraceChannel;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::SetTeamracePosition(uint8_t teamracePosition)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,teamracePosition),teamracePosition);
+#else
     if (m_config.teamracePosition != teamracePosition)
     {
         m_config.teamracePosition = teamracePosition;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::SetFailsafeMode(eFailsafeMode failsafeMode)
 {
+#ifdef CUBERACER_M4
+    (void)failsafeMode;
+#else
     if (m_config.failsafeMode != failsafeMode)
     {
         m_config.failsafeMode = failsafeMode;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::SetBindStorage(rx_config_bindstorage_t value)
 {
+#ifdef CUBERACER_M4
+    elrsCfEditByte(offsetof(cfRxSettings_t,bindStorage),value);
+#else
     if (m_config.bindStorage != value)
     {
         // If switching away from returnable, revert
@@ -1389,27 +1478,39 @@ void RxConfig::SetBindStorage(rx_config_bindstorage_t value)
         m_config.bindStorage = value;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::SetTargetSysId(uint8_t value)
 {
+#ifdef CUBERACER_M4
+    (void)value;
+#else
     if (m_config.targetSysId != value)
     {
         m_config.targetSysId = value;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 void RxConfig::SetSourceSysId(uint8_t value)
 {
+#ifdef CUBERACER_M4
+    (void)value;
+#else
     if (m_config.sourceSysId != value)
     {
         m_config.sourceSysId = value;
         m_modified = EVENT_CONFIG_MODEL_CHANGED;
     }
+#endif
 }
 
 void RxConfig::ReturnLoan()
 {
+#ifdef CUBERACER_M4
+    elrsCfReturnLoan();
+#else
     if (IsOnLoan())
     {
         // go back to flashed UID if there is one
@@ -1421,6 +1522,20 @@ void RxConfig::ReturnLoan()
 
         m_modified = EVENT_CONFIG_UID_CHANGED;
     }
+#endif
 }
 
+#endif
+#if defined(CUBERACER_M4) && defined(TARGET_RX)
+void RxConfig::ApplyCubeSettings(const cfRxSettings_t *s)
+{
+    memset(&m_config,0,sizeof(m_config));
+    m_config.version=RX_CONFIG_VERSION|RX_CONFIG_MAGIC;
+    memcpy(m_config.uid,s->boundUid,6);
+    m_config.bindStorage=s->bindStorage;m_config.modelId=s->modelId;
+    m_config.power=s->telemetryPower;m_config.antennaMode=s->antennaMode;
+    m_config.forceTlmOff=s->forceTelemetryOff;m_config.rateInitialIdx=s->initialRate;
+    m_config.teamraceChannel=s->teamraceChannel;m_config.teamracePosition=s->teamracePosition;
+    m_modified=EVENT_CONFIG_MODEL_CHANGED|EVENT_CONFIG_UID_CHANGED;
+}
 #endif

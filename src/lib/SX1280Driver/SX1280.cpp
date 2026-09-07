@@ -4,6 +4,10 @@
 #include "logging.h"
 #include "RFAMP_hal.h"
 #include <math.h>
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#include "board_profile.h"
+#endif
 
 SX1280Hal hal;
 SX1280Driver *SX1280Driver::instance = NULL;
@@ -57,10 +61,13 @@ SX1280Driver::SX1280Driver(): SX12xxDriverCommon()
 
 void SX1280Driver::End()
 {
+#ifndef CUBERACER_M4
     if (currOpmode != SX1280_MODE_SLEEP)
     {
         SetMode(SX1280_MODE_SLEEP, SX12XX_Radio_All);
     }
+#endif
+    // CubeRacer holds reset and stops its owned peripherals without SPI commands.
     hal.end();
     RFAMP.TXRXdisable();
     RemoveCallbacks();
@@ -71,6 +78,9 @@ void SX1280Driver::End()
 bool SX1280Driver::Begin(uint32_t minimumFrequency, uint32_t maximumFrequency)
 {
     hal.init();
+#ifdef CUBERACER_M4
+    if (cuberacerRadioFault() != CubeRacer::RadioFault::None) return false;
+#endif
     hal.IsrCallback_1 = &SX1280Driver::IsrCallback_1;
     hal.IsrCallback_2 = &SX1280Driver::IsrCallback_2;
 
@@ -130,7 +140,12 @@ transitioning from FS mode and the other from Standby mode. This causes the tx d
         hal.WriteCommand(SX1280_RADIO_SET_REGULATORMODE, SX1280_USE_DCDC, SX12XX_Radio_All);        // Enable DCDC converter instead of LDO
     }
 
+#ifdef CUBERACER_M4
+    hal.WaitOnBusy(SX12XX_Radio_All);
+    return cuberacerRadioFault() == CubeRacer::RadioFault::None;
+#else
     return true;
+#endif
 }
 
 void SX1280Driver::startCWTest(uint32_t freq, SX12XX_Radio_Number_t radioNumber)
@@ -183,6 +198,11 @@ void SX1280Driver::Config(uint8_t bw, uint8_t sf, uint8_t cr, uint32_t regfreq,
  ***/
 void SX1280Driver::SetOutputPower(int8_t power)
 {
+#ifdef CUBERACER_M4
+    // Fixed passive SX1281 RF path: enforce the board ceiling even for direct
+    // requests, MatchTX and positive power-calibration adjustments.
+    if (power > CubeRacer::MAX_OUTPUT_DBM) power=CubeRacer::MAX_OUTPUT_DBM;
+#endif
     uint8_t pwrNew = constrain(power, SX1280_POWER_MIN, SX1280_POWER_MAX) + (-SX1280_POWER_MIN);
 
     if ((pwrPending == PWRPENDING_NONE && pwrCurrent != pwrNew) || pwrPending != pwrNew)

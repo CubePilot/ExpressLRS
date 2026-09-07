@@ -1,0 +1,3 @@
+platformio==6.1.18
+protobuf==7.36.1
+grpcio-tools==1.83.1

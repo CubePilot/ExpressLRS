@@ -2,6 +2,15 @@
 #include "common.h"
 #include "devLED.h"
 
+static void configureLED(int pin)
+{
+#ifdef CUBERACER_M4
+    (void)pin; // M7 establishes shared GPIO configuration before granting it.
+#else
+    pinMode(pin, OUTPUT);
+#endif
+}
+
 #if defined(TARGET_TX)
 #include "POWERMGNT.h"
 #endif
@@ -53,19 +62,19 @@ static bool initialize()
     bool hasLED = false;
     if (GPIO_PIN_LED_BLUE != UNDEF_PIN)
     {
-        pinMode(GPIO_PIN_LED_BLUE, OUTPUT);
+        configureLED(GPIO_PIN_LED_BLUE);
         digitalWrite(GPIO_PIN_LED_BLUE, LOW ^ GPIO_LED_BLUE_INVERTED);
         hasLED = true;
     }
     if (GPIO_PIN_LED_GREEN != UNDEF_PIN)
     {
-        pinMode(GPIO_PIN_LED_GREEN, OUTPUT);
+        configureLED(GPIO_PIN_LED_GREEN);
         digitalWrite(GPIO_PIN_LED_GREEN, HIGH ^ GPIO_LED_GREEN_INVERTED);
         hasLED = true;
     }
     if (GPIO_PIN_LED_RED != UNDEF_PIN)
     {
-        pinMode(GPIO_PIN_LED_RED, OUTPUT);
+        configureLED(GPIO_PIN_LED_RED);
         digitalWrite(GPIO_PIN_LED_RED, LOW ^ GPIO_LED_RED_INVERTED);
         hasLED = true;
     }

@@ -1,3 +1,9 @@
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#endif
+#ifdef CUBERACER_M4
+#include "receiver_link.h"
+#endif
 #include "CRSFRouter.h"
 #include "LowPassFilter.h"
 #include "rxtx_common.h"
@@ -18,6 +24,9 @@
 #include "rx-serial/SerialIO.h"
 #include "rx-serial/SerialNOOP.h"
 #include "rx-serial/SerialCRSF.h"
+#ifdef CUBERACER_M4
+#include "rx-serial/SerialCubeFramework.h"
+#endif
 #include "rx-serial/SerialSBUS.h"
 #include "rx-serial/SerialSUMD.h"
 #include "rx-serial/SerialAirPort.h"
@@ -839,7 +848,9 @@ void LostConnection(bool resumeRx)
     {
         if (hwTimer::running)
         {
+#ifndef CUBERACER_M4
             while(micros() - PFDloop.getIntEventTime() > 250); // time it just after the tock()
+#endif
             hwTimer::stop();
         }
         SetRFLinkRate(ExpressLRS_nextAirRateIndex, false); // also sets to initialFreq
@@ -933,6 +944,12 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
 
 void ICACHE_RAM_ATTR OnELRSBindMSP(uint8_t* newUid4)
 {
+#ifdef CUBERACER_M4
+    uint8_t candidate[6]={0,0,newUid4[0],newUid4[1],newUid4[2],newUid4[3]};
+    elrsCfBindUid(candidate);
+    return;
+#endif
+
     // Binding over MSP only contains 4 bytes due to packet size limitations, clear out any leading bytes
     UID[0] = 0;
     UID[1] = 0;
@@ -1045,6 +1062,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
     DBGW('s');
 #endif
 
+#ifndef CUBERACER_M4
     if (otaSync->otaProtocol == TX_MAVLINK_MODE)
     {
         config.SetSerialProtocol(PROTOCOL_MAVLINK);
@@ -1067,6 +1085,7 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
         config.SetAntennaMode(otaSync->geminiMode);
     }
 
+#endif
     // Will change the packet air rate in loop() if this changes
     ExpressLRS_nextAirRateIndex = enumRatetoIndex((expresslrs_RFrates_e)otaSync->rfRateEnum);
     updateSwitchModePendingFromOta(otaSync->switchEncMode);
@@ -1278,6 +1297,12 @@ void DataUlReceiveComplete()
 
 static void setupSerial()
 {
+#ifdef CUBERACER_M4
+    static SerialCubeFramework sharedReceiver;
+    static NullStream nullLog;
+    serialIO=&sharedReceiver;BackpackOrLogStrm=&nullLog;
+    return;
+#endif
     bool sbusSerialOutput = false;
 	bool sumdSerialOutput = false;
     bool mavlinkSerialOutput = false;
@@ -1543,6 +1568,9 @@ void reconfigureSerial1()
 
 static void serialShutdown()
 {
+#ifdef CUBERACER_M4
+    return; // Static shared-memory backend has no UART to shut down.
+#endif
     BackpackOrLogStrm = new NullStream();
     if(serialIO != nullptr)
     {
@@ -1560,6 +1588,9 @@ void reconfigureSerial()
 
 static void setupConfigAndPocCheck()
 {
+#ifdef CUBERACER_M4
+    return; // No EEPROM initialization or boot-count binding on the passenger core.
+#endif
     eeprom.Begin();
     config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load();
@@ -1583,6 +1614,7 @@ static void setupConfigAndPocCheck()
 
 static void setupTarget()
 {
+#ifndef CUBERACER_M4
     if (GPIO_PIN_ANT_CTRL != UNDEF_PIN)
     {
         pinMode(GPIO_PIN_ANT_CTRL, OUTPUT);
@@ -1594,6 +1626,7 @@ static void setupTarget()
         }
     }
 
+#endif
     setupTargetCommon();
 }
 
@@ -1700,7 +1733,7 @@ static void cycleRfMode(unsigned long now)
     } // if time to switch RF mode
 }
 
-static void EnterBindingMode()
+static void EnterBindingMode(bool administered = false)
 {
     if (InBindingMode)
     {
@@ -1708,6 +1741,10 @@ static void EnterBindingMode()
         return;
     }
 
+#ifdef CUBERACER_M4
+    if (elrsCfBeginBinding(administered)!=CF_RX_OK) return;
+#else
+    (void)administered;
     // never enter binding mode if binding is supposed to only be administered through the web UI
     if (config.GetBindStorage() == BINDSTORAGE_ADMINISTERED) {
         return;
@@ -1717,6 +1754,8 @@ static void EnterBindingMode()
     // Model can be reloaned immediately by binding now
     config.ReturnLoan();
     config.Commit();
+
+#endif
 
     // Binding uses 50Hz, and InvertIQ
     OtaCrcInitializer = OTA_VERSION_ID;
@@ -1800,6 +1839,7 @@ static void updateBindingMode(unsigned long now)
     }
 #endif
 
+#ifndef CUBERACER_M4
     // If the power on counter is >=3, enter binding, the counter will be reset after 2s
     else if (!InBindingMode && config.GetPowerOnCounter() >= 3)
     {
@@ -1811,17 +1851,30 @@ static void updateBindingMode(unsigned long now)
         EnterBindingMode();
     }
 
+#endif
+
     // If the eeprom is indicating that we're not bound, enter binding
     else if (!UID_IS_BOUND(UID) && !InBindingMode)
     {
         DBGLN("RX has not been bound, enter binding mode");
+#ifdef CUBERACER_M4
+        static uint32_t lastAutoBind=0;
+        const uint32_t now=millis();
+        if (uint32_t(now-lastAutoBind)>=1000U && !elrsCfOperationPending()) {
+            lastAutoBind=now;elrsCfRequestCommand(CF_RX_BIND);
+        }
+#else
         EnterBindingMode();
+#endif
     }
 
     else if (BindingModeRequest)
     {
         DBGLN("Connected request to enter binding mode");
         BindingModeRequest = false;
+#ifdef CUBERACER_M4
+        elrsCfRequestCommand(config.IsOnLoan() ? CF_RX_RETURN_LOAN : CF_RX_BIND);
+#else
         if (connectionState == connected)
         {
             LostConnection(false);
@@ -1844,11 +1897,16 @@ static void updateBindingMode(unsigned long now)
             config.Commit();
         }
         EnterBindingMode();
+#endif
     }
 }
 
 void EnterBindingModeSafely()
 {
+#ifdef CUBERACER_M4
+    elrsCfRequestCommand(config.IsOnLoan() ? CF_RX_RETURN_LOAN : CF_RX_BIND);
+    return;
+#endif
     // Will not enter Binding mode if in the process of a passthrough update
     // or currently binding
     if (connectionState == serialUpdate || InBindingMode)
@@ -1890,6 +1948,14 @@ static void checkSendLinkStatsToFc(uint32_t now)
         if (connectionState == disconnected)
         {
             getRFlinkInfo();
+#ifdef CUBERACER_M4
+            cfRxStatus_t status{};
+            status.packetRateHz=1000000U/ExpressLRS_currAirRate_Modparams->interval;
+            status.rssiDbm=-(linkStats.active_antenna ? linkStats.uplink_RSSI_2 : linkStats.uplink_RSSI_1);
+            status.snr=linkStats.uplink_SNR;status.linkQuality=linkStats.uplink_Link_quality;
+            status.antenna=linkStats.active_antenna;status.power=POWERMGNT::currPower();
+            elrsCfPublishStats(&status);
+#endif
         }
 
         if ((connectionState != disconnected && connectionHasModelMatch && teamraceHasModelMatch) ||
@@ -1988,6 +2054,9 @@ static void updateSwitchMode()
 
 static void CheckConfigChangePending()
 {
+#ifdef CUBERACER_M4
+    return; // The current radio grant owns settings reconfiguration.
+#endif
     if (config.IsModified() && !InBindingMode && connectionState < NO_CONFIG_SAVE_STATES)
     {
         LostConnection(false);
@@ -2017,6 +2086,10 @@ RF_PRE_INIT()
 
 void resetConfigAndReboot()
 {
+#ifdef CUBERACER_M4
+    elrsCfResetSettings();
+    return;
+#endif
     config.SetDefaults(true);
     // Prevent WDT from rebooting too early if
     // all this flash write is taking too long
@@ -2038,6 +2111,11 @@ void resetConfigAndReboot()
 
 void setup()
 {
+#ifdef CUBERACER_M4
+    options_init(); // Fixed RAM-only board/options profile, even when RF is disabled.
+    elrsCfInit();
+    return; // Radio runtime begins only after a current M7 grant.
+#endif
 #ifdef DBG_PIN_PORT
     DBG_PIN_INIT();
 #endif
@@ -2109,6 +2187,9 @@ void setup()
         }
         crsfRouter.addEndpoint(&crsfReceiver);
         crsfRouter.addConnector(&otaConnector);
+#ifdef CUBERACER_M4
+        elrsCfStartCrsfRouter();
+#endif
         setupSerial();
         setupSerial1();
 
@@ -2148,6 +2229,10 @@ void main_loop()
 void loop()
 #endif
 {
+#ifdef CUBERACER_M4
+    elrsCfPoll(micros());
+    if (!elrsCfRadioRunning()) { __WFI();return; }
+#endif
     unsigned long now = millis();
 
 #if defined(PLATFORM_STM32) && defined(USBCON) && defined(USBD_USE_CDC)
@@ -2184,6 +2269,7 @@ void loop()
     // read and process any data from serial ports, send any queued non-RC data
     handleSerialIO();
 
+#ifndef CUBERACER_M4
     // If the reboot time is set and the current time is past the reboot time then reboot.
     if (rebootTime != 0 && now > rebootTime) {
 #if defined(PLATFORM_STM32)
@@ -2193,6 +2279,7 @@ void loop()
 #endif
     }
 
+#endif
     CheckConfigChangePending();
     executeDeferredFunction(micros());
 
@@ -2287,6 +2374,9 @@ struct bootloader {
 
 void reset_into_bootloader(void)
 {
+#ifdef CUBERACER_M4
+    return; // Whole-chip DFU and USB belong to M7.
+#else
     SERIAL_PROTOCOL_TX.println((const char *)&target_name[4]);
     SERIAL_PROTOCOL_TX.flush();
 #if defined(PLATFORM_ESP8266)
@@ -2297,10 +2387,169 @@ void reset_into_bootloader(void)
     setConnectionState(serialUpdate);
 #elif defined(PLATFORM_STM32)
     delay(100);
-#if defined(STM32H7xx)
+#if defined(CUBERACER_M4)
+    return; // Whole-chip ROM DFU is owned by the M7 deployment path.
+#elif defined(STM32H7xx)
     cubenode_reset_into_dfu();
 #else
     NVIC_SystemReset();
 #endif
 #endif
+#endif
 }
+
+#ifdef CUBERACER_M4
+void elrsCfApplyRuntime(const cfRxSettings_t *settings)
+{
+    config.ApplyCubeSettings(settings);
+    firmwareOptions.lock_on_first_connection=settings->lockOnFirstConnection;
+    memcpy(UID,settings->boundUid,UID_LEN);
+    // Radio reconfiguration consumes the verified change event in the main loop.
+    // No radio or shared GPIO register is touched by configuration application.
+}
+#endif
+
+#ifdef CUBERACER_M4
+cfRxResult_e elrsCfRuntimeCommand(cfRxCommand_e command)
+{
+    const auto auth=elrsCfMutationAuthorization();
+    if (auth!=CF_RX_OK) return auth;
+    switch (command) {
+    case CF_RX_RESET_SETTINGS: return elrsCfResetSettings();
+    case CF_RX_RETURN_LOAN: return elrsCfReturnLoan();
+    case CF_RX_BIND:
+    case CF_RX_CANCEL_BIND:
+#ifdef CUBERACER_M4_RADIO_DISABLED
+        return CF_RX_UNSUPPORTED;
+#else
+        if (!elrsCfRadioRunning()) return CF_RX_BUSY;
+        if (command==CF_RX_BIND) {
+            if (connectionState==connected) LostConnection(false);
+            EnterBindingMode(true);
+            return elrsCfSettingsResult();
+        }
+        {
+            const auto result=elrsCfCancelBinding();
+            if (result==CF_RX_OK && InBindingMode) ExitBindingMode();
+            return result;
+        }
+#endif
+    default: return CF_RX_INVALID;
+    }
+}
+#endif
+
+#ifdef CUBERACER_M4
+void elrsCfResetCrsfRouter()
+{
+    // Caller masks local interrupts while resetting ISR-shared assemblers.
+#ifndef CUBERACER_M4_RADIO_DISABLED
+    otaConnector.Reset();
+    DataDlSender.ResetState();
+    DataUlReceiver.ResetState();
+#endif
+}
+bool elrsCfForwardToFcAllowed()
+{
+    // Preserve SerialCRSF's team-race forwarding policy.
+    return elrsCfRadioReady() && teamraceHasModelMatch;
+}
+void elrsCfTelemetrySensor(uint8_t type)
+{
+    if(type==CRSF_FRAMETYPE_BATTERY_SENSOR) crsfBatterySensorDetected=true;
+    if(type==CRSF_FRAMETYPE_BARO_ALTITUDE || type==CRSF_FRAMETYPE_VARIO) crsfBaroSensorDetected=true;
+}
+#endif
+
+#ifdef CUBERACER_M4
+uint8_t elrsCfRadioFault()
+{
+    switch(cuberacerRadioFault()) {
+    case CubeRacer::RadioFault::None: return 0;
+    case CubeRacer::RadioFault::SpiTimeout: return CF_RX_RADIO_SPI_TIMEOUT;
+    case CubeRacer::RadioFault::SpiError: return CF_RX_RADIO_SPI_ERROR;
+    default: return CF_RX_RADIO_UNAVAILABLE;
+    }
+}
+#ifndef CUBERACER_M4_RADIO_DISABLED
+#include "radio_runtime.h"
+namespace {
+struct RadioCritical {
+    uint32_t previous=__get_PRIMASK();
+    RadioCritical() { __disable_irq(); }
+    ~RadioCritical() { __set_PRIMASK(previous); }
+};
+struct CubeRadioHooks {
+    bool grant(uint32_t session) { return cuberacerRadioGrant(session); }
+    void prepare() {
+        // Registrations, logger and device objects live for the whole M4 boot.
+        // Never reload options or reinitialize the shared-memory endpoint here.
+        static NullStream logger;BackpackOrLogStrm=&logger;
+        serialBaud=firmwareOptions.uart_baud;
+        crsfRouter.addEndpoint(&crsfReceiver);crsfRouter.addConnector(&otaConnector);
+        elrsCfStartCrsfRouter();setupSerial();
+        devicesRegister(ui_devices,ARRAY_SIZE(ui_devices));devicesInit();
+        registerButtonFunction(ACTION_BIND,EnterBindingModeSafely);
+        registerButtonFunction(ACTION_RESET_REBOOT,resetConfigAndReboot);
+        devicesStart();
+    }
+    bool begin() {
+        setupBindingFromConfig();FHSSrandomiseFHSSsequence(uidMacSeedGet());
+        return Radio.Begin(FHSSgetMinimumFreq(),FHSSgetMaximumFreq()) && !fault();
+    }
+    bool configure() {
+        RadioCritical guard;
+        // No phase-alignment wait: a stopped timer must never block shutdown or
+        // settings application. DIO1/TIM1 cannot observe half-applied RF state.
+        hwTimer::stop();InBindingMode=false;
+        setupBindingFromConfig();FHSSrandomiseFHSSsequence(uidMacSeedGet());
+        ChannelDataReset();elrsCfResetCrsfRouter();
+        setConnectionState(disconnected);connectionHasModelMatch=false;
+        RXtimerState=tim_disconnected;LockRFmode=false;
+        OtaNonce=0;hwTimer::resetFreqOffset();LQCalc.reset();LQCalcDVDA.reset();
+        LPF_Offset.init(0);LPF_OffsetDx.init(0);PfdPrevRawOffset=0;
+        alreadyTLMresp=false;uplinkLQ=0;GotConnectionMillis=0;
+        POWERMGNT::init();DynamicPower_UpdateRx(true);
+        Radio.RXdoneCallback=&RXdoneISR;Radio.TXdoneCallback=&TXdoneISR;
+        scanIndex=config.GetRateInitialIdx();
+        for(unsigned i=0;i<RATE_MAX && !isSupportedRFRate(scanIndex);++i)scanIndex=(scanIndex+1)%RATE_MAX;
+        SetRFLinkRate(scanIndex,false);
+        antenna=config.GetAntennaMode()==1 ? 1 : 0;digitalWrite(GPIO_PIN_ANT_CTRL,antenna);
+        DataUlReceiver.SetDataToReceive(DataUlBuffer,ELRS_DATA_UL_BUFFER);
+        devicesTriggerEvent(config.Commit());
+        RFmodeCycleMultiplier=RFmodeCycleMultiplierSlow/2;
+        RFmodeLastCycled=LastSyncPacket=millis();
+        return !fault();
+    }
+    bool timer() {
+        hwTimer::init(HWtimerCallbackTick,HWtimerCallbackTock);
+        if(!hwTimer::initialized())return false;
+        cuberacerRadioTimerEnable();return true;
+    }
+    bool receive() {
+        Radio.RXnb();
+        return !fault();
+    }
+    uint8_t fault() const { return elrsCfRadioFault(); }
+    bool stop() {
+        RadioCritical guard;
+        // No SX1281 command is needed to stop a wedged radio. Owned peripherals
+        // are stopped directly and reset stays asserted until M7 removes power.
+        Radio.End();buttonResetPendingPresses();
+        elrsCfResetCrsfRouter();ChannelDataReset();
+        InBindingMode=false;connectionHasModelMatch=false;RXtimerState=tim_disconnected;
+        setConnectionState(disconnected);
+        return cuberacerRadioQuiescent();
+    }
+} cubeRadioHooks;
+CubeRacer::RadioRuntime<CubeRadioHooks> cubeRadioRuntime(cubeRadioHooks);
+}
+uint8_t elrsCfRadioStart(uint32_t session) { return cubeRadioRuntime.start(session); }
+uint8_t elrsCfRadioReconfigure() { return cubeRadioRuntime.reconfigure(); }
+bool elrsCfRadioStop() { return cubeRadioRuntime.stop(); }
+#else
+uint8_t elrsCfRadioStart(uint32_t) { return CF_RX_RADIO_UNAVAILABLE; }
+uint8_t elrsCfRadioReconfigure() { return CF_RX_RADIO_UNAVAILABLE; }
+bool elrsCfRadioStop() { return true; } // This build never acquired peripherals.
+#endif
+#endif

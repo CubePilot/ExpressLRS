@@ -1,59 +1,40 @@
-# CubeRacer radio transport
+# CubeRacer radio integration
 
-The SX1280-family command driver is shared with other ExpressLRS targets. This
-board adapter owns SPI4 runtime registers, PA4 NSS, PF5 reset, PE6 antenna and
-PB4's CPU2 interrupt mask/pending flag. BUSY is PE5. M7 owns PE10 power, RCC,
-SYSCFG, shared EXTI edge registers and GPIO mode/AF/pull/speed configuration.
+CubeRacer uses the existing SX1280 command driver, SPIEx and STM32duino SPI/GPIO
+implementation. `CubeRacerRadio.cpp` supplies grant/revoke validation, M4 interrupt
+setup, latched SPI faults, and shutdown/readback before M7 removes radio power.
 
-`cuberacerRadioGrant(session)` is a future coordinated-startup boundary, not an
-inference from valid settings. There is currently **no caller**, and the normal
-`CUBERACER_M4_RADIO_DISABLED` build refuses every grant. Removing that define alone
-does not supply a grant or a complete startup sequence. The caller must wait for
-M7's explicit session-matched power/pin grant after the TCXO settle interval.
-M4 readbacks reject incompatible pins, EXTI routing/edges and clocks. The clock
-contract is SPI45SEL=PCLK2 at 120 MHz; SPI runs at /8 =15 MHz, MSB-first/mode0.
-Other clocks are rejected. The board radio is SX1281 with an assumed fitted
-52 MHz TCXO; no GPIO selects TCXO operation or controls its supply separately.
+The shared `SX1280Hal::WaitOnBusy()` reads BUSY with Arduino `digitalRead()`.
+BUSY timeouts are advisory: command transfers proceed, as requested for this
+bring-up. They do not latch a fault or prevent initialization by themselves.
+Invalid firmware revisions and actual SPI transfer errors still fail startup.
 
-Constructor/init attempts without a grant perform no peripheral writes. After
-grant, only the listed peripheral and BSRR registers are written. No Arduino SPI,
-pinMode, generic attachInterrupt or RFAMP power hooks are used for these paths.
-M7 configures PB4 rising-edge EXTI before releasing M4. The M4 vector references
-`CUBERACER_DIO1_IRQHandler`, which touches only PB4's CPU2 pending bit and callback.
-Antenna selection uses BSRR, including the ordinary ELRS diversity path.
+SPIEx uses `spi_transfer()` directly so its result is available to the caller.
+The existing build middleware compiles an adapted STM32duino `spi_com.c` only
+for M4: shared GPIO/RCC writes are omitted, TX/RX/EOT waits have a 1 ms deadline
+and an iteration limit, and every transfer exit disables SPI. SPIEx releases
+NSS and restores the previous interrupt mask on errors as well as success.
+The installed framework is unchanged; other targets retain its original source.
 
-Transfers are synchronous, byte-wide, bounded to259 bytes, with one NSS assertion
-for the entire command and EOT before release. BUSY is checked before any command.
-Local PRIMASK nesting protects against TIM1/DIO1 SPI re-entry. Both BUSY and SPI
-polling have a1ms elapsed deadline and an iteration ceiling for a stalled clock.
-This ceiling is a termination guard, not a guaranteed real-time bound if the clock
-has stopped. Normal operation must still be measured against the RF timer budget.
-Any timeout/SPI error latches a fault, suppresses later commands and prevents
-`SX1280Driver::Begin()` from reporting success, including failure after its final
-command. Failed HAL reads return zero bytes. SPI failure releases NSS and disables
-SPI while preserving SSI. `end()` holds reset low and relinquishes ownership; it
-never powers off PE10 or changes shared configuration. M7 may isolate/power off
-only after the future quiescence handshake. Reinitialization cannot clear a fault;
-an explicit end followed by a fresh coordinated grant is required.
+M7 configures the radio pins/clocks, EXTI routing and PE10 power before granting
+M4 access. Output changes use `digitalWrite()`; STM32H757's LL implementation
+writes BSRR, so different pins on the same port do not require a cross-core
+lock. Pin mode/AF/pull configuration remains M7-owned. Local interrupt exclusion
+protects complete SPI transactions against DIO1/TIM1 re-entry on M4.
 
-Run host transport and real SX1280 HAL/Begin tests:
+Validation:
 
 ```sh
 bash src/lib/CubeRacerRadio/tests/run.sh
+STM32_CORE_ROOT=/path/to/framework-arduinoststm32 python3 src/variants/CUBERACER_M4/tests/test_spi_transport.py
 ```
 
-The fake register/time boundary checks absent ownership, clock rejection,259-byte
-framing, BUSY/SPI timeouts, clock wrap/freeze, latched errors, owned output bits and
-nested interrupt restoration. HAL tests exercise all command classes on BUSY
-failure, normal firmware-register command framing and failure at every command in
-Begin. The Cortex-M4 firmware build checks the real CMSIS register bindings.
-The disabled build compiles out grant readbacks; compile that source once without
-the disabled define as an additional audit, without flashing/enabling startup.
+On this Mac, use `CXX=/opt/homebrew/bin/g++-15` for the first command. The HAL
+test holds BUSY high and checks that commands and initialization proceed, then
+injects SPI failures. The transport test runs the adapted Arduino transfer and
+SPIEx transaction against fake I/O, including frozen-timebase and cleanup cases.
 
-Remaining gates: coordinated grant/revoke and explicit RF READY/fault status;
-remaining device initialization paths; conservative SX1281 power-profile
-enforcement; physical BUSY diagnosis and SWD bench validation. Passing host tests does not validate RF timing,
-board wiring, power/TCXO signal integrity or transmitter interoperability.
+The sections below retain details of the other board integration hooks.
 
 ## TIM1 clock ownership
 
@@ -99,18 +80,18 @@ The existing Button debounce logic reads only PF3 through the adapter. It perfor
 no generic pin initialization. A missing grant or radio fault suppresses button
 actions and clears partial press history, preventing a stale release from
 triggering an action in the next session. Binding still uses M7's configuration
-authority. The existing LED device preserves its patterns and inversion handling
-but writes only PF13 through BSRR; no generic GPIO setup/write path runs on M4.
-LED fault indication remains available until the grant ends. Both pin adapters
-accept the canonical digital indices 81/91 from the fixed board profile.
-STM32duino PF3/PF13 macros are analog aliases and must not be passed to the
-signed 8-bit LED device; the fixed indices also correct the earlier adapter check.
+authority. The existing LED device uses digitalWrite directly; its initialization
+and updates run within the receiver lifecycle. M7 still configures its pin.
+The fixed digital indices 81/91 avoid the variant's analog pin aliases.
 
-The radio test script includes real Button and LED-device fixtures as well as
-11 transport tests. They cover pre-grant inactivity, granted operation, fault
-behavior, revocation, short/long presses and connected/disconnected/binding/fault
-LED patterns. These are host tests, not a physical button or LED validation.
+Reset and antenna selection use the common SX1280/receiver GPIO paths. Reset pin
+mode setup happens in generic HAL initialization, while M7 configures it for M4.
+RFAMP uses its common implementation; all external PA/TX/RX enable pins are
+undefined in this board profile, so it performs no GPIO operations.
 
+The radio tests exercise the common reset and RFAMP code, button debounce and
+LED patterns, as well as advisory BUSY handling and SPI failures. They do not
+replace physical signal measurements.
 
 ## Fixed profile and power ceiling
 
@@ -135,8 +116,8 @@ encoded SetTxParams command. This does not measure conducted RF power.
 
 CubeFramework now supplies radio-control messages and M7's ownership policy;
 Betaflight consumes those messages and gates RC/telemetry on RF READY. M4's radio
-lifecycle consumer and start/reconfigure/quiesce hooks are still pending. Both
-production RF gates remain disabled, and no new firmware has been flashed.
+lifecycle consumer implements start/reconfigure/quiesce hooks. The local radio
+build enables startup; current hardware results are in the Betaflight handover.
 
 ## M4 lifecycle integration
 

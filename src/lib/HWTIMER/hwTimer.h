@@ -40,6 +40,9 @@ public:
      * The timer is stopped and no more callbacks are performed.
      */
     static void stop();
+#ifdef CUBERACER_M4
+    static bool initialized();
+#endif
 
     /**
      * @brief Resume the timer.

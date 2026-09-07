@@ -1,0 +1,10 @@
+{
+  "expresslrs_base": "b89668d5797d89ddc5949c30924a82258a40cd4c",
+  "platformio": "6.1.18",
+  "ststm32": "19.5.0",
+  "framework-arduinoststm32": "bdea44d918a8c508eb6b526731e29924816de84a",
+  "toolchain-gccarmnoneeabi": "1.120301.0",
+  "cubeframework": "2b5909d8fd72200e1bd7e52c1c51ddea20f26bcf",
+  "protobuf": "7.36.1",
+  "grpcio-tools": "1.83.1"
+}

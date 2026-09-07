@@ -16,7 +16,7 @@
     defined(ARDUINO_GENERIC_H747IGTX) || defined(ARDUINO_GENERIC_H747IITX) ||\
     defined(ARDUINO_GENERIC_H750ZBTX) || defined(ARDUINO_GENERIC_H753ZITX) ||\
     defined(ARDUINO_GENERIC_H757AIIX) || defined(ARDUINO_GENERIC_H757IITX) ||\
-    defined(ARDUINO_CUBENODE)
+    defined(ARDUINO_CUBENODE) || defined(ARDUINO_CUBERACER_M4)
 #include "pins_arduino.h"
 
 // Digital PinName array

@@ -1,5 +1,8 @@
 #ifdef PLATFORM_STM32
 #include "hwTimer.h"
+#ifdef CUBERACER_M4
+#include "CubeRacerRadio.h"
+#endif
 
 void (*hwTimer::callbackTick)() = nullptr;
 void (*hwTimer::callbackTock)() = nullptr;
@@ -15,12 +18,24 @@ volatile int32_t hwTimer::FreqOffset = 0;
 static volatile uint32_t PauseDuration;
 static bool alreadyInit = false;
 
+#if defined(CUBERACER_M4)
+// No peripheral accesses from static constructors, before M7 grants ownership.
+static HardwareTimer deferredTimer;
+static HardwareTimer *MyTim = &deferredTimer;
+#else
 static HardwareTimer *MyTim = new HardwareTimer(TIM1);
+#endif
 
 void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
 {
+#ifdef CUBERACER_M4
+    if (!cuberacerRadioTimerReady()) return;
+#endif
     if (!alreadyInit)
     {
+#if defined(CUBERACER_M4)
+        MyTim->setup(TIM1);
+#endif
         hwTimer::callbackTick = callbackTick;
         hwTimer::callbackTock = callbackTock;
         MyTim->attachInterrupt(hwTimer::callback);
@@ -39,9 +54,16 @@ void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
     }
 }
 
+#ifdef CUBERACER_M4
+bool hwTimer::initialized() { return alreadyInit && callbackTick && callbackTock && cuberacerRadioTimerReady(); }
+#endif
+
 void hwTimer::stop()
 {
     running = false;
+#ifdef CUBERACER_M4
+    if (!alreadyInit || !cuberacerTimerClockAllowed(reinterpret_cast<uintptr_t>(TIM1))) return;
+#endif
     MyTim->pause();
     MyTim->setCount(0);
 }
@@ -63,6 +85,9 @@ void hwTimer::pause(uint32_t duration)
 
 void hwTimer::resume()
 {
+#ifdef CUBERACER_M4
+    if (!alreadyInit || !cuberacerRadioTimerReady()) { stop(); return; }
+#endif
 #if defined(TARGET_RX)
     isTick = false;
 #endif
@@ -92,6 +117,9 @@ void hwTimer::phaseShift(int32_t newPhaseShift)
 
 void hwTimer::callback(void)
 {
+#ifdef CUBERACER_M4
+    if (!cuberacerRadioTimerReady()) { stop(); return; }
+#endif
     if (hwTimer::isTick)
     {
 #if defined(TARGET_TX)
