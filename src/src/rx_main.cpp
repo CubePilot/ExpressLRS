@@ -1851,22 +1851,13 @@ static void updateBindingMode(unsigned long now)
         EnterBindingMode();
     }
 
-#endif
-
     // If the eeprom is indicating that we're not bound, enter binding
     else if (!UID_IS_BOUND(UID) && !InBindingMode)
     {
         DBGLN("RX has not been bound, enter binding mode");
-#ifdef CUBERACER_M4
-        static uint32_t lastAutoBind=0;
-        const uint32_t now=millis();
-        if (uint32_t(now-lastAutoBind)>=1000U && !elrsCfOperationPending()) {
-            lastAutoBind=now;elrsCfRequestCommand(CF_RX_BIND);
-        }
-#else
         EnterBindingMode();
-#endif
     }
+#endif // CubeRacer binding is explicit so an empty UID does not block settings edits.
 
     else if (BindingModeRequest)
     {
